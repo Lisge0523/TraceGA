@@ -3,4 +3,6 @@ packages:
   - "packages/trace-server"
   - "packages/trace-admin"
 allowBuilds:
+  '@nestjs/core': true
   esbuild: false
+  msw: true
