@@ -3,7 +3,6 @@ import { AiAnalyzeDto } from '../dto/ai-analyze.dto'
 import { AnalysisService } from '../../analysis/services/analysis.service'
 import { GlmClientService } from './glm-client.service'
 import { PromptService } from './prompt.service'
-
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name)
@@ -137,5 +136,129 @@ export class AiService {
         suggestions: [],
       }
     }
+  }
+  /**
+   * 生成 AI 数据日报
+   *
+   * @param appId  应用 ID
+   * @param date   报表日期，格式 YYYY-MM-DD，默认昨天
+   */
+  async generateDailyReport(appId: string, date?: string) {
+    // 1. 确定日期：默认昨天
+    const targetDate = date || this.getYesterday()
+    const yesterdayDate = this.getDayBefore(targetDate)
+
+    // 2. 并行查询：今日汇总 + 昨日汇总 + 今日事件排行 + 昨日事件排行 + 错误事件
+    const startOfDay = `${targetDate}T00:00:00`
+    const endOfDay = `${targetDate}T23:59:59`
+    const startOfYesterday = `${yesterdayDate}T00:00:00`
+    const endOfYesterday = `${yesterdayDate}T23:59:59`
+
+    const [
+      todaySummary,
+      yesterdaySummary,
+      todayEvents,
+      yesterdayEvents,
+      errorEvents,
+    ] = await Promise.all([
+      this.analysisService.getSummary({ appId, startTime: startOfDay, endTime: endOfDay }),
+      this.analysisService.getSummary({ appId, startTime: startOfYesterday, endTime: endOfYesterday }),
+      this.analysisService.getFiltered({ appId, startTime: startOfDay, endTime: endOfDay }),
+      this.analysisService.getFiltered({ appId, startTime: startOfYesterday, endTime: endOfYesterday }),
+      this.analysisService.getFiltered({ appId, eventTypes: ['error'], startTime: startOfDay, endTime: endOfDay }),
+    ])
+
+    // 3. 计算环比变化
+    const pvChange = this.calcChange(todaySummary.pv, yesterdaySummary.pv)
+    const uvChange = this.calcChange(todaySummary.uv, yesterdaySummary.uv)
+
+    // 4. 计算每个事件的环比变化
+    const eventTrends = this.buildEventTrends(todayEvents, yesterdayEvents)
+
+    // 5. 组装结构化 JSON
+    const stats = {
+      date: targetDate,
+      totalPv: todaySummary.pv,
+      totalUv: todaySummary.uv,
+      pvChange,       // 如 -3.2
+      uvChange,       // 如 1.5
+      topEvents: todayEvents.slice(0, 5).map(e => ({
+        eventName: e.event_name,
+        pv: e.count,
+      })),
+      eventTrends: eventTrends.filter(t => Math.abs(t.pvChange) >= 10),
+      errorEvents: errorEvents.map(e => ({
+        eventName: e.event_name,
+        count: e.count,
+      })),
+    }
+
+    // 6. 从 Prompt 文件加载模板
+    const systemPrompt = this.promptService.system('daily-report')
+    const userPrompt = this.promptService.user('daily-report', {
+      statsJson: JSON.stringify(stats, null, 2),
+    })
+
+    // 7. 调用 GLM
+    try {
+      const result = await this.glmClient.chat(systemPrompt, userPrompt, {
+        temperature: 0.5,   // 日报可以稍微有点创造性
+        maxTokens: 800,     // 200 字中文 ≈ 400-600 tokens
+      })
+
+      return {
+        stats,
+        report: result.content,
+        generatedAt: new Date().toISOString(),
+      }
+    } catch (err) {
+      this.logger.error('日报生成失败', err)
+      return {
+        stats,
+        report: 'AI 日报生成失败，请稍后重试。以下是今日原始数据。',
+        generatedAt: new Date().toISOString(),
+      }
+    }
+  }
+
+  // ===== 辅助方法 =====
+
+  /** 获取昨天的日期字符串 YYYY-MM-DD */
+  private getYesterday(): string {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    return d.toISOString().slice(0, 10)
+  }
+
+  /** 获取指定日期前一天的日期字符串 */
+  private getDayBefore(date: string): string {
+    const d = new Date(date)
+    d.setDate(d.getDate() - 1)
+    return d.toISOString().slice(0, 10)
+  }
+
+  /** 计算环比变化百分比，保留 1 位小数 */
+  private calcChange(today: number, yesterday: number): number {
+    if (yesterday === 0) return today > 0 ? 100 : 0
+    return Math.round(((today - yesterday) / yesterday) * 1000) / 10
+  }
+
+  /** 构建每个事件的环比变化列表 */
+  private buildEventTrends(
+    todayEvents: Array<{ event_name: string; count: number }>,
+    yesterdayEvents: Array<{ event_name: string; count: number }>,
+  ): Array<{ eventName: string; todayPv: number; yesterdayPv: number; pvChange: number }> {
+    const yesterdayMap = new Map<string, number>()
+    yesterdayEvents.forEach(e => yesterdayMap.set(e.event_name, e.count))
+
+    return todayEvents.map(e => {
+      const yesterdayPv = yesterdayMap.get(e.event_name) || 0
+      return {
+        eventName: e.event_name,
+        todayPv: e.count,
+        yesterdayPv,
+        pvChange: this.calcChange(e.count, yesterdayPv),
+      }
+    })
   }
 }
