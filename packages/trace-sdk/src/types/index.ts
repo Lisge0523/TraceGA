@@ -45,11 +45,6 @@ export interface TrackEventData {
 }
 
 export interface EnvInfo {
-  browser: string;
-  os: string;
-  screen: string;
-  viewport: string;
-  uid: string;
   url: string;
   userAgent: string;
 }

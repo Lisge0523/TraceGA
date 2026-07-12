@@ -1,6 +1,5 @@
 import type { ITraceCore } from '../../../types';
 import type { ErrorHandler, ErrorPayloadBase } from '../types';
-import { getBrowserContext } from '../types';
 
 export interface JsErrorPayload extends ErrorPayloadBase {
   type: 'js-error';
@@ -53,7 +52,6 @@ export class JsErrorHandler implements ErrorHandler {
       colno: event.colno || undefined,
       errorName: error?.name,
       stack: error?.stack,
-      ...getBrowserContext(),
     };
   }
 }
