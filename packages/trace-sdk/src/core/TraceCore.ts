@@ -8,7 +8,10 @@ export class TraceCore implements ITraceCore {
   private plugins: TracePlugin[] = [];
 
   register(config: TraceConfig): void {
-    this.config = { ...config };
+    this.config = {
+      ...config,
+      sampleRate: this.normalizeSampleRate(config.sampleRate),
+    };
     this.resetPlugins();
     this.installBuiltinPlugins(config);
     console.log('[TraceGA SDK] Registered with config:', config);
@@ -19,6 +22,11 @@ export class TraceCore implements ITraceCore {
       console.warn('[TraceGA SDK] Not registered, trackEvent ignored.');
       return;
     }
+
+    if (!this.shouldSampleEvent()) {
+      return;
+    }
+
     const event: TrackEventData = {
       eventName,
       timestamp: Date.now(),
@@ -69,6 +77,20 @@ export class TraceCore implements ITraceCore {
   private resetPlugins(): void {
     this.plugins.forEach(plugin => plugin.uninstall());
     this.plugins = [];
+  }
+
+  private shouldSampleEvent(): boolean {
+    const sampleRate = this.config?.sampleRate ?? 1;
+
+    return sampleRate >= 1 || Math.random() < sampleRate;
+  }
+
+  private normalizeSampleRate(sampleRate = 1): number {
+    if (!Number.isFinite(sampleRate)) {
+      return 1;
+    }
+
+    return Math.min(1, Math.max(0, sampleRate));
   }
 }
 

@@ -63,6 +63,42 @@ describe('ErrorPlugin', () => {
     spy.mockRestore();
   });
 
+  it('should apply sampleRate to plugin events', () => {
+    const core = new TraceCore();
+    const spy = vi.spyOn(console, 'log');
+
+    core.register({
+      projectId: 'test',
+      reportUrl: 'http://localhost/api',
+      sampleRate: 0,
+      plugins: {
+        error: true,
+      },
+      errorPlugin: {
+        js: true,
+        promise: false,
+        resource: false,
+        http: false,
+      },
+    });
+    spy.mockClear();
+
+    window.dispatchEvent(
+      new ErrorEvent('error', {
+        message: 'sampled out plugin error',
+      }),
+    );
+
+    expect(spy).not.toHaveBeenCalledWith(
+      '[TraceGA SDK] Event tracked:',
+      expect.objectContaining({
+        eventName: 'js-error',
+      }),
+    );
+
+    spy.mockRestore();
+  });
+
   it('should track js-error events', () => {
     const plugin = new ErrorPlugin();
     const core = {
