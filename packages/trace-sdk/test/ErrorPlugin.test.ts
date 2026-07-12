@@ -34,6 +34,10 @@ describe('ErrorPlugin', () => {
           type: 'js-error',
           message: 'configured boom',
         }),
+        envInfo: expect.objectContaining({
+          url: window.location.href,
+          userAgent: navigator.userAgent,
+        }),
       }),
     );
 

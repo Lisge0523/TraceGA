@@ -1,6 +1,5 @@
 import type { ITraceCore } from '../../../types';
 import type { ErrorHandler, ErrorPayloadBase } from '../types';
-import { getBrowserContext } from '../types';
 
 export interface PromiseErrorPayload extends ErrorPayloadBase {
   type: 'promise-error';
@@ -45,7 +44,6 @@ export class PromiseErrorHandler implements ErrorHandler {
         reasonType: 'Error',
         errorName: reason.name,
         stack: reason.stack,
-        ...getBrowserContext(),
       };
     }
 
@@ -56,7 +54,6 @@ export class PromiseErrorHandler implements ErrorHandler {
       message: stringifiedReason || 'Unhandled promise rejection',
       reasonType: this.getReasonType(reason),
       reason: stringifiedReason,
-      ...getBrowserContext(),
     };
   }
 

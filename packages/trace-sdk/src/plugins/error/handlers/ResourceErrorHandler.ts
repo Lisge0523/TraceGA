@@ -1,6 +1,5 @@
 import type { ITraceCore } from '../../../types';
 import type { ErrorHandler, ErrorPayloadBase } from '../types';
-import { getBrowserContext } from '../types';
 
 export interface ResourceErrorPayload extends ErrorPayloadBase {
   type: 'resource-error';
@@ -53,7 +52,6 @@ export class ResourceErrorHandler implements ErrorHandler {
       tagName,
       resourceUrl,
       outerHTML: target.outerHTML,
-      ...getBrowserContext(),
     };
   }
 

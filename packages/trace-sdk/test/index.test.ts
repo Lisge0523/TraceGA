@@ -66,6 +66,10 @@ describe('TraceCore skeleton', () => {
       '[TraceGA SDK] Event tracked:',
       expect.objectContaining({
         eventName: 'sampled_in_event',
+        envInfo: expect.objectContaining({
+          url: window.location.href,
+          userAgent: navigator.userAgent,
+        }),
       }),
     );
 

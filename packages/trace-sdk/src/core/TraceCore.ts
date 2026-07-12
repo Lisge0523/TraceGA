@@ -12,6 +12,7 @@ export class TraceCore implements ITraceCore {
       ...config,
       sampleRate: this.normalizeSampleRate(config.sampleRate),
     };
+    this.envInfo = this.collectEnvInfo();
     this.resetPlugins();
     this.installBuiltinPlugins(config);
     console.log('[TraceGA SDK] Registered with config:', config);
@@ -32,7 +33,7 @@ export class TraceCore implements ITraceCore {
       timestamp: Date.now(),
       customParams: params || {},
       commonParams: this.commonParams,
-      envInfo: this.envInfo!,
+      envInfo: this.collectEnvInfo(),
     };
     console.log('[TraceGA SDK] Event tracked:', event);
   }
@@ -50,7 +51,9 @@ export class TraceCore implements ITraceCore {
   }
 
   getEnvInfo(): EnvInfo {
-    return this.envInfo!;
+    this.envInfo = this.collectEnvInfo();
+
+    return this.envInfo;
   }
 
   private installBuiltinPlugins(config: TraceConfig): void {
@@ -91,6 +94,21 @@ export class TraceCore implements ITraceCore {
     }
 
     return Math.min(1, Math.max(0, sampleRate));
+  }
+
+  private collectEnvInfo(): EnvInfo {
+    return {
+      url: this.getCurrentUrl(),
+      userAgent: this.getUserAgent(),
+    };
+  }
+
+  private getCurrentUrl(): string {
+    return typeof window !== 'undefined' ? window.location.href : '';
+  }
+
+  private getUserAgent(): string {
+    return typeof navigator !== 'undefined' ? navigator.userAgent : '';
   }
 }
 

@@ -1,6 +1,5 @@
 import type { ITraceCore } from '../../../types';
 import type { ErrorHandler, ErrorPayloadBase } from '../types';
-import { getBrowserContext } from '../types';
 
 type XhrMeta = {
   method: string;
@@ -92,7 +91,6 @@ export class HttpErrorHandler implements ErrorHandler {
             status: response.status,
             statusText: response.statusText,
             duration: Date.now() - startedAt,
-            ...getBrowserContext(),
           });
         }
 
@@ -107,7 +105,6 @@ export class HttpErrorHandler implements ErrorHandler {
           errorName: error instanceof Error ? error.name : undefined,
           stack: error instanceof Error ? error.stack : undefined,
           duration: Date.now() - startedAt,
-          ...getBrowserContext(),
         });
         throw error;
       }
@@ -153,7 +150,6 @@ export class HttpErrorHandler implements ErrorHandler {
             status: xhr.status,
             statusText: xhr.statusText,
             duration: Date.now() - startedAt,
-            ...getBrowserContext(),
           });
         }
       };
@@ -174,7 +170,6 @@ export class HttpErrorHandler implements ErrorHandler {
           status: xhr.status || undefined,
           statusText: xhr.statusText || undefined,
           duration: Date.now() - startedAt,
-          ...getBrowserContext(),
         });
       };
 
