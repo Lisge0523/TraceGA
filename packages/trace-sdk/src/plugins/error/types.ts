@@ -6,7 +6,6 @@ export interface ErrorHandler {
 }
 
 export interface ErrorPayloadBase {
-  [key: string]: unknown;
   type: string;
   message: string;
   errorName?: string;
