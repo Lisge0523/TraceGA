@@ -1,22 +1,52 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ErrorPlugin, traceCore } from '../src';
+import { ErrorPlugin, TraceCore } from '../src';
 
-describe('TraceCore skeleton', () => {
-  it('should register without error', () => {
+describe('TraceCore', () => {
+  it('should register with default config', () => {
+    const core = new TraceCore();
+
     expect(() => {
-      traceCore.register({
+      core.register({
         projectId: 'test',
         reportUrl: 'http://localhost/api',
-        sampleRate: 0.5,
       });
     }).not.toThrow();
+
+    expect(core.getConfig()).toEqual(
+      expect.objectContaining({
+        projectId: 'test',
+        sampleRate: 1,
+        maxBufferSize: 50,
+        flushInterval: 3000,
+      }),
+    );
   });
 
-  it('should call trackEvent and log', () => {
-    const spy = vi.spyOn(console, 'log');
-    traceCore.trackEvent('test_event', { foo: 'bar' });
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+  it('should build and pass a stable event to the reporter', () => {
+    const core = new TraceCore();
+    const reporter = { report: vi.fn() };
+
+    core.setReporter(reporter);
+    core.register({
+      projectId: 'test',
+      reportUrl: 'http://localhost/api',
+    });
+    core.addCommonParams({ channel: 'web' });
+    core.trackEvent('test_event', { foo: 'bar' });
+
+    expect(reporter.report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: 'test_event',
+        projectId: 'test',
+        priority: 'normal',
+        customParams: { foo: 'bar' },
+        commonParams: { channel: 'web' },
+        timestamp: expect.any(Number),
+        envInfo: expect.objectContaining({
+          uid: expect.any(String),
+        }),
+      }),
+    );
   });
 });
 

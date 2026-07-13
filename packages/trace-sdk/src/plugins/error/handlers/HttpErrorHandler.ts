@@ -114,7 +114,11 @@ export class HttpErrorHandler implements ErrorHandler {
     this.originalXhrSend = XMLHttpRequest.prototype.send;
     const handler = this;
 
-    XMLHttpRequest.prototype.open = function patchedOpen(method: string, url: string | URL) {
+    XMLHttpRequest.prototype.open = function patchedOpen(
+      this: XMLHttpRequest,
+      method: string,
+      url: string | URL,
+    ) {
       handler.xhrMeta.set(this, {
         method,
         url: String(url),
@@ -123,7 +127,7 @@ export class HttpErrorHandler implements ErrorHandler {
       return handler.originalXhrOpen!.apply(this, arguments as any);
     } as XMLHttpRequest['open'];
 
-    XMLHttpRequest.prototype.send = function patchedSend() {
+    XMLHttpRequest.prototype.send = function patchedSend(this: XMLHttpRequest) {
       const xhr = this;
       const startedAt = Date.now();
 

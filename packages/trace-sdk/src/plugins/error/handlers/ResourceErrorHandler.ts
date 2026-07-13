@@ -39,7 +39,7 @@ export class ResourceErrorHandler implements ErrorHandler {
   }
 
   private isResourceError(event: Event): boolean {
-    return event.target instanceof Element && event.target !== window;
+    return event.target instanceof Element;
   }
 
   private normalizeResourceError(event: Event): ResourceErrorPayload {
