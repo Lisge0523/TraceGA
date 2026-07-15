@@ -1,97 +1,128 @@
 import { Injectable } from '@nestjs/common'
-import { Repository } from 'typeorm'
-import { InjectRepository } from '@nestjs/typeorm'
-import { TrackEntity } from '../../track/entities/track.entity'
+import { Prisma } from '@/generated/prisma'
+import { PrismaService } from '@/database/prisma.service'
 import { AnalysisSummaryDto, AnalysisTrendDto, AnalysisFilterDto } from '../dto/analysis.dto'
 
 @Injectable()
 export class AnalysisRepository {
-  constructor(
-    @InjectRepository(TrackEntity)
-    private readonly trackRepository: Repository<TrackEntity>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getSummary(query: AnalysisSummaryDto) {
     const { appId, startTime, endTime } = query
 
-    const queryBuilder = this.trackRepository
-      .createQueryBuilder('t')
-      .select('COUNT(*)', 'pv')
-      .addSelect('COUNT(DISTINCT t.userId)', 'uv')
-      .addSelect('COUNT(DISTINCT t.eventName)', 'eventCount')
+    const where: Prisma.event_logWhereInput = this.buildEventLogWhere(appId, startTime, endTime)
 
-    this.applyFilters(queryBuilder, appId, startTime, endTime)
+    const [pvResult, uvSubquery, eventNames] = await this.prisma.$transaction([
+      this.prisma.event_log.count({ where }),
+      this.prisma.event_log.findMany({
+        where,
+        select: { uid: true },
+        distinct: ['uid'],
+      }),
+      this.prisma.event_log.findMany({
+        where,
+        select: { event_name: true },
+        distinct: ['event_name'],
+      }),
+    ])
 
-    const result = await queryBuilder.getRawOne()
+    const uv = uvSubquery.length
+    const eventCount = eventNames.length
 
     return {
-      pv: Number(result?.pv) || 0,
-      uv: Number(result?.uv) || 0,
-      eventCount: Number(result?.eventCount) || 0,
+      pv: pvResult,
+      uv,
+      eventCount,
     }
   }
 
   async getTrend(query: AnalysisTrendDto) {
     const { appId, eventType, startTime, endTime, interval = 'day' } = query
 
-    let dateFormat = '%Y-%m-%d'
-    if (interval === 'hour') {
-      dateFormat = '%Y-%m-%d %H:00:00'
-    }
+    const dateFormat = interval === 'hour' ? '%Y-%m-%d %H:00:00' : '%Y-%m-%d'
 
-    const queryBuilder = this.trackRepository
-      .createQueryBuilder('t')
-      .select(`DATE_FORMAT(t.timestamp, '${dateFormat}')`, 'date')
-      .addSelect('COUNT(*)', 'pv')
-      .addSelect('COUNT(DISTINCT t.userId)', 'uv')
+    const result = await this.prisma.$queryRaw`
+      SELECT 
+        DATE_FORMAT(created_at, ${dateFormat}) as date,
+        COUNT(*) as pv,
+        COUNT(DISTINCT uid) as uv
+      FROM event_log
+      ${this.buildRawWhere(appId, startTime, endTime, eventType)}
+      GROUP BY date
+      ORDER BY date ASC
+    `
 
-    this.applyFilters(queryBuilder, appId, startTime, endTime)
-
-    if (eventType) {
-      queryBuilder.andWhere('t.eventType = :eventType', { eventType })
-    }
-
-    queryBuilder.groupBy('date').orderBy('date', 'ASC')
-
-    return queryBuilder.getRawMany()
+    return result as Array<{ date: string; pv: number; uv: number }>
   }
 
   async getFiltered(query: AnalysisFilterDto) {
     const { appId, eventTypes, startTime, endTime } = query
 
-    const queryBuilder = this.trackRepository
-      .createQueryBuilder('t')
-      .select('t.eventName', 'event_name')
-      .addSelect('t.eventType', 'event_type')
-      .addSelect('COUNT(*)', 'count')
+    const result = await this.prisma.$queryRaw`
+      SELECT 
+        event_name,
+        event_type,
+        COUNT(*) as count
+      FROM event_log
+      ${this.buildRawWhere(appId, startTime, endTime)}
+      ${eventTypes && eventTypes.length > 0 ? `AND event_type IN (${eventTypes.map(() => '?').join(', ')})` : ''}
+      GROUP BY event_name, event_type
+      ORDER BY count DESC
+      LIMIT 100
+    `
 
-    this.applyFilters(queryBuilder, appId, startTime, endTime)
-
-    if (eventTypes && eventTypes.length > 0) {
-      queryBuilder.andWhere('t.eventType IN (:...eventTypes)', { eventTypes })
-    }
-
-    queryBuilder.groupBy('t.eventName, t.eventType').orderBy('count', 'DESC').limit(100)
-
-    return queryBuilder.getRawMany()
+    return result as Array<{ event_name: string; event_type: string; count: number }>
   }
 
-  private applyFilters(
-    queryBuilder: ReturnType<typeof this.trackRepository.createQueryBuilder>,
+  private buildEventLogWhere(
     appId?: string,
     startTime?: string,
     endTime?: string,
-  ) {
+  ): Prisma.event_logWhereInput {
+    const where: Prisma.event_logWhereInput = {}
+
     if (appId) {
-      queryBuilder.where('t.appId = :appId', { appId })
+      where.project_id = appId
+    }
+
+    const dateFilter: Prisma.DateTimeFilter = {}
+    if (startTime) {
+      dateFilter.gte = new Date(startTime)
+    }
+    if (endTime) {
+      dateFilter.lte = new Date(endTime)
+    }
+    if (Object.keys(dateFilter).length > 0) {
+      where.created_at = dateFilter
+    }
+
+    return where
+  }
+
+  private buildRawWhere(
+    appId?: string,
+    startTime?: string,
+    endTime?: string,
+    eventType?: string,
+  ) {
+    const conditions: string[] = []
+
+    if (appId) {
+      conditions.push(`project_id = '${appId}'`)
     }
 
     if (startTime) {
-      queryBuilder.andWhere('t.timestamp >= :startTime', { startTime })
+      conditions.push(`created_at >= '${startTime}'`)
     }
 
     if (endTime) {
-      queryBuilder.andWhere('t.timestamp <= :endTime', { endTime })
+      conditions.push(`created_at <= '${endTime}'`)
     }
+
+    if (eventType) {
+      conditions.push(`event_type = '${eventType}'`)
+    }
+
+    return conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
   }
 }

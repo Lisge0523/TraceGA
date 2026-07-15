@@ -1,53 +1,44 @@
 import { Injectable } from '@nestjs/common'
-import { Repository } from 'typeorm'
-import { InjectRepository } from '@nestjs/typeorm'
-import { TrackEvent, TrackEntity } from '../entities/track.entity'
-import { generateId } from '@/common/utils'
+import { PrismaService } from '@/database/prisma.service'
+import { TrackEvent } from '../entities/track.entity'
 
 @Injectable()
 export class TrackRepository {
-  constructor(
-    @InjectRepository(TrackEntity)
-    private readonly trackRepository: Repository<TrackEntity>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async insertEvent(event: TrackEvent, ip: string, userAgent: string): Promise<void> {
-    const entity = this.trackRepository.create({
-      eventId: event.eventId || generateId('evt'),
-      eventType: event.eventType,
-      eventName: event.eventName,
-      appId: event.appId,
-      userId: event.userId || '',
-      sessionId: event.sessionId || '',
-      properties: event.properties || {},
-      timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-      url: event.url || '',
-      referrer: event.referrer || '',
-      userAgent: userAgent || '',
-      ip: ip || '',
+    await this.prisma.event_log.create({
+      data: {
+        project_id: event.appId,
+        event_name: event.eventName,
+        event_type: event.eventType,
+        uid: event.userId || '',
+        session_id: event.sessionId || '',
+        page_url: event.url || '',
+        event_params: event.properties || {},
+        common_params: {},
+        user_agent: userAgent || '',
+        ip: ip || '',
+      },
     })
-
-    await this.trackRepository.save(entity)
   }
 
   async insertBatch(events: TrackEvent[], ip: string, userAgent: string): Promise<void> {
-    const entities = events.map((event) =>
-      this.trackRepository.create({
-        eventId: event.eventId || generateId('evt'),
-        eventType: event.eventType,
-        eventName: event.eventName,
-        appId: event.appId,
-        userId: event.userId || '',
-        sessionId: event.sessionId || '',
-        properties: event.properties || {},
-        timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-        url: event.url || '',
-        referrer: event.referrer || '',
-        userAgent: userAgent || '',
-        ip: ip || '',
-      }),
-    )
+    const data = events.map((event) => ({
+      project_id: event.appId,
+      event_name: event.eventName,
+      event_type: event.eventType,
+      uid: event.userId || '',
+      session_id: event.sessionId || '',
+      page_url: event.url || '',
+      event_params: event.properties || {},
+      common_params: {},
+      user_agent: userAgent || '',
+      ip: ip || '',
+    }))
 
-    await this.trackRepository.save(entities)
+    await this.prisma.event_log.createMany({
+      data,
+    })
   }
 }
