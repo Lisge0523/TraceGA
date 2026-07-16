@@ -2,9 +2,11 @@ import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common'
 import { AiAnalyzeService } from '../services/ai-analyze.service'
 import { DailyReportService } from '../services/daily-report.service'
 import { AnomalyExplainService } from '../services/anomaly-explain.service'
+import { NlQueryService } from '../services/nl-query.service'
 import { AiAnalyzeDto } from '../dto/ai-analyze.dto'
 import { DailyReportDto } from '../dto/daily-report.dto'
 import { AnomalyExplainDto } from '../dto/anomaly-explain.dto'
+import { NlQueryDto } from '../dto/nl-query.dto'
 
 @Controller('api/ai')
 export class AiController {
@@ -12,6 +14,7 @@ export class AiController {
     private readonly aiAnalyzeService: AiAnalyzeService,
     private readonly dailyReportService: DailyReportService,
     private readonly anomalyExplainService: AnomalyExplainService,
+    private readonly nlQueryService: NlQueryService,
   ) {}
 
   @Post('analyze')
@@ -30,5 +33,11 @@ export class AiController {
   @HttpCode(HttpStatus.OK)
   async anomalyExplain(@Body() dto: AnomalyExplainDto) {
     return this.anomalyExplainService.explainAnomaly(dto)
+  }
+
+  @Post('nl-query')
+  @HttpCode(HttpStatus.OK)
+  async nlQuery(@Body() dto: NlQueryDto) {
+    return this.nlQueryService.processQuery(dto)
   }
 }
