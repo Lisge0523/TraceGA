@@ -1,6 +1,7 @@
 import { EventBuffer } from './EventBuffer';
 import type { TrackEventData } from '../types';
 import type { StoragePersister } from '../utils/StoragePersister';
+import type { ConcurrencyLimiter } from './ConcurrencyLimiter';
 
 export type Priority = 'urgent' | 'high' | 'normal';
 
@@ -17,6 +18,8 @@ export interface PrioritySchedulerConfig {
   idleTimeoutFallback?: number;
   /** 持久化工具，用于初始化时补发 localStorage 中残留的失败缓存 */
   persister?: StoragePersister;
+  /** 并发限制器，用于控制同时进行的上报请求数 */
+  limiter?: ConcurrencyLimiter;
 }
 
 /**
@@ -46,6 +49,7 @@ export class PriorityScheduler {
   private idleId: number | null;
   private flushing: boolean;
   private persister: StoragePersister | undefined;
+  private limiter: ConcurrencyLimiter | undefined;
 
   constructor(config: PrioritySchedulerConfig) {
     this.maxBufferSize = config.maxBufferSize;
@@ -57,6 +61,7 @@ export class PriorityScheduler {
     this.idleId = null;
     this.flushing = false;
     this.persister = config.persister;
+    this.limiter = config.limiter;
 
     this.urgentBuffer = new EventBuffer<TrackEventData>(this.urgentMaxSize);
     this.highBuffer = new EventBuffer<TrackEventData>(this.maxBufferSize);
@@ -226,7 +231,12 @@ export class PriorityScheduler {
 
     this.flushing = true;
     try {
-      await this.onFlush(events);
+      await this.limiter?.acquire();
+      try {
+        await this.onFlush(events);
+      } finally {
+        this.limiter?.release();
+      }
     } finally {
       this.flushing = false;
     }
@@ -251,7 +261,12 @@ export class PriorityScheduler {
 
     this.flushing = true;
     try {
-      await this.onFlush(events);
+      await this.limiter?.acquire();
+      try {
+        await this.onFlush(events);
+      } finally {
+        this.limiter?.release();
+      }
     } finally {
       this.flushing = false;
     }
