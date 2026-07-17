@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import type { AnalyticsOverview, EventTrend, TopEvent } from '@/types'
+import type { AnalyticsOverview, EventTrend, TopEvent, EventTypeTrendItem } from '@/types'
 
 export const getOverview = (params: {
   startTime?: string
@@ -29,4 +29,12 @@ export const getConversionRate = (params: {
   endTime?: string
 }) => {
   return request.get<{ rate: number }>('/analytics/conversion-rate', { params })
+}
+
+/** 获取按事件类型分组的多日趋势数据 */
+export const getEventTypeTrend = (params: {
+  startTime?: string
+  endTime?: string
+}) => {
+  return request.get<EventTypeTrendItem[]>('/analytics/event-type-trend', { params })
 }
