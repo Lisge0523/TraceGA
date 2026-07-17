@@ -1,5 +1,10 @@
 /* Dashboard 拖拽缩放布局样式覆盖 */
 
+/* 移除 grid item 的 width/height 过渡动画，确保首次加载时容器尺寸立即生效 */
+.react-grid-item {
+  transition-property: left, top !important;
+}
+
 /* 拖拽中禁止文字选中 */
 .react-grid-item.react-draggable-dragging,
 .react-grid-item.react-draggable-dragging *,

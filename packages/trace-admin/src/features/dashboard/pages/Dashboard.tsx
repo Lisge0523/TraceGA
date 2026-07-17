@@ -56,6 +56,7 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [isEditMode, setIsEditMode] = useState(false)
   const [resetKey, setResetKey] = useState(0)
+  const [chartKey, setChartKey] = useState(0)
 
   // 从 localStorage 恢复布局，resetKey 变化时重新加载
   const initialLayout = useMemo(() => loadLayoutFromStorage(), [resetKey])
@@ -81,6 +82,15 @@ export const Dashboard: React.FC = () => {
     }
     fetchData()
   }, [])
+
+  // 数据加载完成后，递增 chartKey 强制图表组件重新挂载，
+  // 确保 ECharts 在 react-grid-layout 容器尺寸完全就位后初始化
+  useEffect(() => {
+    if (!loading) {
+      const timer = setTimeout(() => setChartKey((k) => k + 1), 150)
+      return () => clearTimeout(timer)
+    }
+  }, [loading])
 
   // 布局变更时保存
   const handleLayoutChange = useCallback((_layout: Layout, layouts: ResponsiveLayouts) => {
@@ -229,6 +239,14 @@ export const Dashboard: React.FC = () => {
     tooltip: {
       trigger: 'item' as const,
     },
+    legend: {
+      orient: 'vertical' as const,
+      right: 0,
+      top: 'center',
+      icon: 'circle',
+      itemWidth: 8,
+      itemHeight: 8,
+    },
     series: [
       {
         name: '热门事件',
@@ -340,7 +358,7 @@ export const Dashboard: React.FC = () => {
             styles={{ body: { height: 'calc(100% - 57px)', padding: 16 } }}
             style={{ height: '100%', overflow: 'hidden' }}
           >
-            <ReactECharts option={trendOption} style={{ height: '100%', width: '100%' }} />
+            <ReactECharts key={`trend-${chartKey}`} option={trendOption} style={{ height: '100%', width: '100%' }} />
           </Card>
         </div>
 
@@ -356,7 +374,7 @@ export const Dashboard: React.FC = () => {
             styles={{ body: { height: 'calc(100% - 57px)', padding: 16 } }}
             style={{ height: '100%', overflow: 'hidden' }}
           >
-            <ReactECharts option={topEventsOption} style={{ height: '100%', width: '100%' }} />
+            <ReactECharts key={`pie-${chartKey}`} option={topEventsOption} style={{ height: '100%', width: '100%' }} />
           </Card>
         </div>
 
@@ -372,7 +390,7 @@ export const Dashboard: React.FC = () => {
             styles={{ body: { height: 'calc(100% - 57px)', padding: 16 } }}
             style={{ height: '100%', overflow: 'hidden' }}
           >
-            <ReactECharts option={typeTrendOption} style={{ height: '100%', width: '100%' }} />
+            <ReactECharts key={`type-trend-${chartKey}`} option={typeTrendOption} style={{ height: '100%', width: '100%' }} />
           </Card>
         </div>
 
@@ -388,7 +406,7 @@ export const Dashboard: React.FC = () => {
             styles={{ body: { height: 'calc(100% - 57px)', padding: 16 } }}
             style={{ height: '100%', overflow: 'hidden' }}
           >
-            <ReactECharts option={funnelOption} style={{ height: '100%', width: '100%' }} />
+            <ReactECharts key={`funnel-${chartKey}`} option={funnelOption} style={{ height: '100%', width: '100%' }} />
           </Card>
         </div>
       </ResponsiveGridLayout>
