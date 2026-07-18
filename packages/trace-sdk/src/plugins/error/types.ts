@@ -1,4 +1,4 @@
-import type { ITraceCore } from '../../types';
+import type { ErrorPluginConfig, ITraceCore } from '../../types';
 import { sanitizeEnvironmentUrl } from '../../core/env';
 
 export interface ErrorHandler {
@@ -6,14 +6,23 @@ export interface ErrorHandler {
   uninstall(): void;
 }
 
-export interface ErrorPluginOptions {
+export interface ErrorPluginOptions extends ErrorPluginConfig {
   onError?: (error: unknown, context: string) => void;
+  reportUrl?: string;
+}
+
+export enum ErrorEventName {
+  JsError = 'js-error',
+  PromiseError = 'promise-error',
+  ResourceError = 'resource-error',
+  HttpError = 'http-error',
 }
 
 export interface ErrorPayloadBase {
   [key: string]: unknown;
   type: string;
   message: string;
+  occurredAt: number;
   errorName?: string;
   stack?: string;
   url?: string;

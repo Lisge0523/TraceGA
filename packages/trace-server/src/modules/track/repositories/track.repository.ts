@@ -1,49 +1,53 @@
-import { Injectable } from '@nestjs/common'
-import { ClickHouseService } from '@/database/clickhouse.service'
-import { TrackEvent, TrackEventEntity } from '../entities/track.entity'
-import { generateId } from '@/common/utils'
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@/generated/prisma';
+import { PrismaService } from '@/database/prisma.service';
+import { TrackEvent } from '../entities/track.entity';
 
 @Injectable()
 export class TrackRepository {
-  constructor(private readonly clickHouseService: ClickHouseService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async insertEvent(event: TrackEvent, ip: string, userAgent: string): Promise<void> {
-    const entity: TrackEventEntity = {
-      event_id: event.eventId || generateId('evt'),
-      event_type: event.eventType,
-      event_name: event.eventName,
-      app_id: event.appId,
-      user_id: event.userId || '',
-      session_id: event.sessionId || '',
-      properties: JSON.stringify(event.properties || {}),
-      timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-      url: event.url || '',
-      referrer: event.referrer || '',
-      user_agent: userAgent,
-      ip,
-      created_at: new Date(),
-    }
-
-    await this.clickHouseService.insert('events', [entity])
+    await this.prisma.event_log.create({
+      data: this.toEventLogCreateInput(event, ip, userAgent),
+    });
   }
 
   async insertBatch(events: TrackEvent[], ip: string, userAgent: string): Promise<void> {
-    const entities: TrackEventEntity[] = events.map((event) => ({
-      event_id: event.eventId || generateId('evt'),
-      event_type: event.eventType,
-      event_name: event.eventName,
-      app_id: event.appId,
-      user_id: event.userId || '',
-      session_id: event.sessionId || '',
-      properties: JSON.stringify(event.properties || {}),
-      timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
-      url: event.url || '',
-      referrer: event.referrer || '',
-      user_agent: userAgent,
-      ip,
-      created_at: new Date(),
-    }))
+    if (events.length === 0) {
+      return;
+    }
 
-    await this.clickHouseService.insert('events', entities)
+    await this.prisma.event_log.createMany({
+      data: events.map(event => this.toEventLogCreateManyInput(event, ip, userAgent)),
+    });
+  }
+
+  private toEventLogCreateInput(event: TrackEvent, ip: string, userAgent: string): Prisma.event_logCreateInput {
+    return this.buildEventLogData(event, ip, userAgent);
+  }
+
+  private toEventLogCreateManyInput(event: TrackEvent, ip: string, userAgent: string): Prisma.event_logCreateManyInput {
+    return this.buildEventLogData(event, ip, userAgent);
+  }
+
+  private buildEventLogData(event: TrackEvent, ip: string, userAgent: string) {
+    return {
+      project_id: event.appId,
+      event_name: event.eventName,
+      event_type: event.eventType,
+      occurred_at: this.toOccurredAt(event.timestamp),
+      uid: event.userId || null,
+      session_id: event.sessionId || null,
+      page_url: event.url || null,
+      event_params: event.properties ?? Prisma.JsonNull,
+      common_params: event.referrer ? { referrer: event.referrer } : Prisma.JsonNull,
+      user_agent: userAgent || event.userAgent || null,
+      ip: ip || null,
+    };
+  }
+
+  private toOccurredAt(timestamp?: number): Date {
+    return timestamp ? new Date(timestamp) : new Date();
   }
 }

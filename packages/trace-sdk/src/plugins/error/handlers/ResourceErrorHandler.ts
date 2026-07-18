@@ -49,6 +49,7 @@ export class ResourceErrorHandler implements ErrorHandler {
     return {
       type: 'resource-error',
       message: `Resource load failed: ${tagName}`,
+      occurredAt: Date.now(),
       tagName,
       resourceUrl: sanitizeErrorUrl(resourceUrl),
       ...getBrowserContext(),

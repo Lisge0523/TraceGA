@@ -26,6 +26,11 @@ export class HttpErrorHandler implements ErrorHandler {
   private patchedXhrOpen: XMLHttpRequest['open'] | null = null;
   private patchedXhrSend: XMLHttpRequest['send'] | null = null;
   private readonly xhrMeta = new WeakMap<XMLHttpRequest, XhrMeta>();
+  private readonly reportUrl?: string;
+
+  constructor(reportUrl?: string) {
+    this.reportUrl = sanitizeErrorUrl(reportUrl);
+  }
 
   install(core: ITraceCore): void {
     if (typeof window === 'undefined') {
@@ -65,34 +70,44 @@ export class HttpErrorHandler implements ErrorHandler {
       const method = handler.getFetchMethod(input, init);
       const requestUrl = handler.getFetchUrl(input);
 
+      if (handler.isReportUrl(requestUrl)) {
+        return handler.originalFetch!.call(this, input, init);
+      }
+
       try {
         const response = await handler.originalFetch!.call(this, input, init);
 
         if (!response.ok) {
+          const occurredAt = Date.now();
+
           handler.reportHttpError({
             type: 'http-error',
             requestType: 'fetch',
             message: `HTTP request failed: ${response.status}`,
+            occurredAt,
             method,
             requestUrl,
             status: response.status,
             statusText: response.statusText,
-            duration: Date.now() - startedAt,
+            duration: occurredAt - startedAt,
             ...getBrowserContext(),
           });
         }
 
         return response;
       } catch (error) {
+        const occurredAt = Date.now();
+
         handler.reportHttpError({
           type: 'http-error',
           requestType: 'fetch',
           message: error instanceof Error ? error.message : 'Fetch request failed',
+          occurredAt,
           method,
           requestUrl,
           errorName: error instanceof Error ? error.name : undefined,
           stack: error instanceof Error ? error.stack : undefined,
-          duration: Date.now() - startedAt,
+          duration: occurredAt - startedAt,
           ...getBrowserContext(),
         });
         throw error;
@@ -115,7 +130,7 @@ export class HttpErrorHandler implements ErrorHandler {
     const patchedOpen = function patchedOpen(this: XMLHttpRequest, method: string, url: string | URL) {
       handler.xhrMeta.set(this, {
         method,
-        url: String(url),
+        url: sanitizeErrorUrl(String(url)) ?? String(url),
       });
 
       return handler.originalXhrOpen!.apply(this, arguments as any);
@@ -126,18 +141,24 @@ export class HttpErrorHandler implements ErrorHandler {
       const startedAt = Date.now();
 
       const handleLoadEnd = (): void => {
+        const meta = handler.xhrMeta.get(xhr);
+        if (handler.isReportUrl(meta?.url)) {
+          return;
+        }
+
         if (xhr.status >= 400) {
-          const meta = handler.xhrMeta.get(xhr);
+          const occurredAt = Date.now();
 
           handler.reportHttpError({
             type: 'http-error',
             requestType: 'xhr',
             message: `HTTP request failed: ${xhr.status}`,
+            occurredAt,
             method: meta?.method,
             requestUrl: meta?.url,
             status: xhr.status,
             statusText: xhr.statusText,
-            duration: Date.now() - startedAt,
+            duration: occurredAt - startedAt,
             ...getBrowserContext(),
           });
         }
@@ -145,16 +166,22 @@ export class HttpErrorHandler implements ErrorHandler {
 
       const handleNetworkError = (): void => {
         const meta = handler.xhrMeta.get(xhr);
+        if (handler.isReportUrl(meta?.url)) {
+          return;
+        }
+
+        const occurredAt = Date.now();
 
         handler.reportHttpError({
           type: 'http-error',
           requestType: 'xhr',
           message: 'XMLHttpRequest failed',
+          occurredAt,
           method: meta?.method,
           requestUrl: meta?.url,
           status: xhr.status || undefined,
           statusText: xhr.statusText || undefined,
-          duration: Date.now() - startedAt,
+          duration: occurredAt - startedAt,
           ...getBrowserContext(),
         });
       };
@@ -224,5 +251,9 @@ export class HttpErrorHandler implements ErrorHandler {
     }
 
     return undefined;
+  }
+
+  private isReportUrl(url?: string): boolean {
+    return Boolean(url && this.reportUrl && url === this.reportUrl);
   }
 }

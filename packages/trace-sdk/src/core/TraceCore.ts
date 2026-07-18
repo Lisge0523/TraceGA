@@ -12,6 +12,8 @@ import type {
   TrackEventParams,
 } from '../types';
 import { ErrorPlugin } from '../plugins/error/ErrorPlugin';
+import { BehaviorPlugin } from '../plugins/behavior/BehaviorPlugin';
+import { PerformancePlugin } from '../plugins/performance/PerformancePlugin';
 import { deepClone, isPlainObject } from '../utils';
 import { DefaultReporter } from './DefaultReporter';
 import { collectEnvInfo, refreshEnvInfo } from './env';
@@ -36,7 +38,9 @@ export class TraceCore implements ITraceCore {
   private reporter: TraceReporter | null = null;
   private managedReporter: DefaultReporter | null = null;
   private reporterOverridden = false;
-  private autoErrorPlugin: ErrorPlugin | null = null;
+  private errorPlugin: ErrorPlugin | null = null;
+  private behaviorPlugin: BehaviorPlugin | null = null;
+  private performancePlugin: PerformancePlugin | null = null;
 
   register(config: TraceConfig): void {
     let hooks: TraceLifecycleHooks | undefined;
@@ -57,13 +61,17 @@ export class TraceCore implements ITraceCore {
         enableDebug: this.resolveBoolean(config.enableDebug, DEFAULT_CONFIG.enableDebug, 'enableDebug'),
         includeUrlQuery: this.resolveBoolean(config.includeUrlQuery, DEFAULT_CONFIG.includeUrlQuery, 'includeUrlQuery'),
         includeUrlHash: this.resolveBoolean(config.includeUrlHash, DEFAULT_CONFIG.includeUrlHash, 'includeUrlHash'),
+        plugins: this.resolvePluginConfig(config.plugins, 'plugins'),
+        errorPlugin: this.resolvePluginConfig(config.errorPlugin, 'errorPlugin'),
+        eventPlugin: this.resolvePluginConfig(config.eventPlugin, 'eventPlugin'),
+        performancePlugin: this.resolvePluginConfig(config.performancePlugin, 'performancePlugin'),
         hooks: Object.freeze(hooks),
       }) as ResolvedTraceConfig;
 
       this.config = resolvedConfig;
       this.envInfo = collectEnvInfo(this.getEnvCollectionOptions());
       this.configureManagedReporter(resolvedConfig);
-      this.syncAutoErrorPlugin(resolvedConfig.enableAutoError);
+      this.syncBuiltinPlugins(resolvedConfig);
       const configSnapshot = deepClone(resolvedConfig);
       this.runHook(() => resolvedConfig.hooks.onReady?.(configSnapshot), 'onReady');
     } catch (error) {
@@ -223,8 +231,7 @@ export class TraceCore implements ITraceCore {
 
   destroy(): void {
     try {
-      this.autoErrorPlugin?.uninstall();
-      this.autoErrorPlugin = null;
+      this.disposeBuiltinPlugins();
 
       const reporter = this.reporter;
       this.reporter = null;
@@ -468,6 +475,20 @@ export class TraceCore implements ITraceCore {
     return value;
   }
 
+  private resolvePluginConfig<T extends object>(value: T | undefined, fieldName: string): Readonly<T> {
+    if (value === undefined) {
+      return Object.freeze({}) as Readonly<T>;
+    }
+    if (!isPlainObject(value)) {
+      throw new TypeError(`${fieldName} must be a plain object`);
+    }
+    if (Object.values(value).some(option => typeof option !== 'boolean')) {
+      throw new TypeError(`${fieldName} options must be booleans`);
+    }
+
+    return Object.freeze({ ...value });
+  }
+
   private getEnvCollectionOptions(): {
     includeQuery: boolean;
     includeHash: boolean;
@@ -517,22 +538,41 @@ export class TraceCore implements ITraceCore {
     }
   }
 
-  private syncAutoErrorPlugin(enabled: boolean): void {
-    if (!enabled) {
-      this.autoErrorPlugin?.uninstall();
-      this.autoErrorPlugin = null;
-      return;
+  private syncBuiltinPlugins(config: Readonly<ResolvedTraceConfig>): void {
+    this.disposeBuiltinPlugins();
+
+    if (config.enableAutoError || config.plugins.error) {
+      this.errorPlugin = new ErrorPlugin({
+        ...config.errorPlugin,
+        reportUrl: config.reportUrl,
+        onError: (error, context) => this.handleError(error, context),
+      });
+      this.errorPlugin.install(this);
     }
 
-    if (this.autoErrorPlugin) {
-      return;
+    if (config.plugins.event) {
+      this.behaviorPlugin = new BehaviorPlugin({
+        click: config.eventPlugin.click === false ? false : undefined,
+        pageView: config.eventPlugin.route === false ? false : undefined,
+        exposure: config.eventPlugin.exposure === false ? false : undefined,
+        onError: (error, context) => this.handleError(error, context),
+      });
+      this.behaviorPlugin.install(this);
     }
 
-    const plugin = new ErrorPlugin({
-      onError: (error, context) => this.handleError(error, context),
-    });
-    plugin.install(this);
-    this.autoErrorPlugin = plugin;
+    if (config.plugins.performance) {
+      this.performancePlugin = new PerformancePlugin(config.performancePlugin);
+      this.performancePlugin.install(this);
+    }
+  }
+
+  private disposeBuiltinPlugins(): void {
+    this.performancePlugin?.uninstall();
+    this.performancePlugin = null;
+    this.behaviorPlugin?.uninstall();
+    this.behaviorPlugin = null;
+    this.errorPlugin?.uninstall();
+    this.errorPlugin = null;
   }
 
   private runHook(callback: () => void, context: string): void {

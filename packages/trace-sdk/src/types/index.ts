@@ -6,6 +6,28 @@ export type EventPriority = 'urgent' | 'high' | 'normal';
 
 export type EventType = 'custom' | 'click' | 'page_view' | 'exposure' | 'error' | 'performance' | (string & Record<never, never>);
 
+export type BuiltinPluginName = 'error' | 'event' | 'performance';
+
+export type BuiltinPluginsConfig = Partial<Record<BuiltinPluginName, boolean>>;
+
+export interface ErrorPluginConfig {
+  js?: boolean;
+  promise?: boolean;
+  resource?: boolean;
+  http?: boolean;
+}
+
+export interface EventPluginConfig {
+  click?: boolean;
+  route?: boolean;
+  exposure?: boolean;
+}
+
+export interface PerformancePluginConfig {
+  webVitals?: boolean;
+  resource?: boolean;
+}
+
 export interface TraceConfig {
   projectId: string;
   reportUrl: string;
@@ -17,6 +39,10 @@ export interface TraceConfig {
   enableDebug?: boolean;
   includeUrlQuery?: boolean;
   includeUrlHash?: boolean;
+  plugins?: BuiltinPluginsConfig;
+  errorPlugin?: ErrorPluginConfig;
+  eventPlugin?: EventPluginConfig;
+  performancePlugin?: PerformancePluginConfig;
   hooks?: TraceLifecycleHooks;
 }
 
@@ -31,6 +57,10 @@ export interface ResolvedTraceConfig {
   enableDebug: boolean;
   includeUrlQuery: boolean;
   includeUrlHash: boolean;
+  plugins: Readonly<BuiltinPluginsConfig>;
+  errorPlugin: Readonly<ErrorPluginConfig>;
+  eventPlugin: Readonly<EventPluginConfig>;
+  performancePlugin: Readonly<PerformancePluginConfig>;
   hooks: TraceLifecycleHooks;
 }
 

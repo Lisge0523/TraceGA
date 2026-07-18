@@ -42,6 +42,7 @@ export class PromiseErrorHandler implements ErrorHandler {
       return {
         type: 'promise-error',
         message: reason.message || 'Unhandled promise rejection',
+        occurredAt: Date.now(),
         reasonType: 'Error',
         errorName: reason.name,
         stack: reason.stack,
@@ -54,6 +55,7 @@ export class PromiseErrorHandler implements ErrorHandler {
     return {
       type: 'promise-error',
       message: stringifiedReason || 'Unhandled promise rejection',
+      occurredAt: Date.now(),
       reasonType: this.getReasonType(reason),
       reason: stringifiedReason,
       ...getBrowserContext(),

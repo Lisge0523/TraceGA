@@ -10,9 +10,24 @@ export class ErrorPlugin implements TracePlugin {
 
   private installed = false;
   private activeHandlers: ErrorHandler[] = [];
-  private readonly handlers: ErrorHandler[] = [new JsErrorHandler(), new PromiseErrorHandler(), new ResourceErrorHandler(), new HttpErrorHandler()];
+  private readonly handlers: ErrorHandler[];
 
-  constructor(private readonly options: ErrorPluginOptions = {}) {}
+  constructor(private readonly options: ErrorPluginOptions = {}) {
+    const enabled = {
+      js: true,
+      promise: true,
+      resource: true,
+      http: true,
+      ...options,
+    };
+
+    const handlers: ErrorHandler[] = [];
+    if (enabled.js) handlers.push(new JsErrorHandler());
+    if (enabled.promise) handlers.push(new PromiseErrorHandler());
+    if (enabled.resource) handlers.push(new ResourceErrorHandler());
+    if (enabled.http) handlers.push(new HttpErrorHandler(options.reportUrl));
+    this.handlers = handlers;
+  }
 
   install(core: ITraceCore): void {
     if (this.installed) {

@@ -48,6 +48,7 @@ export class JsErrorHandler implements ErrorHandler {
     return {
       type: 'js-error',
       message: event.message || error?.message || 'Unknown JavaScript error',
+      occurredAt: Date.now(),
       filename: sanitizeErrorUrl(event.filename),
       lineno: event.lineno || undefined,
       colno: event.colno || undefined,
