@@ -4,15 +4,14 @@ export const BehaviorEventName = {
   EXPOSURE: 'element_exposure',
 } as const;
 
-export type BehaviorEventName =
-  (typeof BehaviorEventName)[keyof typeof BehaviorEventName];
+export type BehaviorEventName = (typeof BehaviorEventName)[keyof typeof BehaviorEventName];
 
 export interface ClickTrackingOptions {
   /** Custom CSS selectors. At most 20 selectors, 256 characters each. */
   selectors?: readonly string[];
   /** Preserve URL query parameters. Defaults to false. */
   includeQuery?: boolean;
-  /** Preserve the URL hash. Defaults to false. */
+  /** Preserve the URL hash. Defaults to false. Enable only for trusted hash routes. */
   includeHash?: boolean;
 }
 
@@ -20,7 +19,7 @@ export interface PageViewTrackingOptions {
   trackInitial?: boolean;
   /** Preserve URL query parameters. Defaults to false. */
   includeQuery?: boolean;
-  /** Preserve the URL hash. Defaults to false. */
+  /** Preserve the URL hash. Defaults to false. Enable only for trusted hash routes. */
   includeHash?: boolean;
 }
 
@@ -34,7 +33,7 @@ export interface ExposureTrackingOptions {
   once?: boolean;
   /** Preserve URL query parameters. Defaults to false. */
   includeQuery?: boolean;
-  /** Preserve the URL hash. Defaults to false. */
+  /** Preserve the URL hash. Defaults to false. Enable only for trusted hash routes. */
   includeHash?: boolean;
 }
 
@@ -54,8 +53,7 @@ interface ElementBehaviorFields {
   matchedSelector: string;
 }
 
-export interface ClickBehaviorPayload
-  extends ElementBehaviorFields {
+export interface ClickBehaviorPayload extends ElementBehaviorFields {
   [key: string]: unknown;
   type: 'click';
   pageUrl: string;
@@ -67,16 +65,10 @@ export interface PageViewBehaviorPayload {
   type: 'page_view';
   pageUrl: string;
   previousUrl?: string;
-  navigationType:
-    | 'initial'
-    | 'pushState'
-    | 'replaceState'
-    | 'popstate'
-    | 'hashchange';
+  navigationType: 'initial' | 'pushState' | 'replaceState' | 'popstate' | 'hashchange';
 }
 
-export interface ExposureBehaviorPayload
-  extends ElementBehaviorFields {
+export interface ExposureBehaviorPayload extends ElementBehaviorFields {
   [key: string]: unknown;
   type: 'exposure';
   pageUrl: string;
@@ -104,7 +96,4 @@ export interface ResolvedExposureTrackingOptions {
   includeHash: boolean;
 }
 
-export type BehaviorErrorHandler = (
-  error: unknown,
-  context: string,
-) => void;
+export type BehaviorErrorHandler = (error: unknown, context: string) => void;

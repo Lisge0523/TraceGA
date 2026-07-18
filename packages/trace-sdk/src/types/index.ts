@@ -4,6 +4,8 @@ export type TrackEventParams = Record<string, unknown>;
 
 export type EventPriority = 'urgent' | 'high' | 'normal';
 
+export type EventType = 'custom' | 'click' | 'page_view' | 'exposure' | 'error' | 'performance' | (string & Record<never, never>);
+
 export interface TraceConfig {
   projectId: string;
   reportUrl: string;
@@ -12,8 +14,9 @@ export interface TraceConfig {
   flushInterval?: number;
   maxConcurrentRequests?: number;
   enableAutoError?: boolean;
-  enableAutoPerformance?: boolean;
   enableDebug?: boolean;
+  includeUrlQuery?: boolean;
+  includeUrlHash?: boolean;
   hooks?: TraceLifecycleHooks;
 }
 
@@ -25,8 +28,9 @@ export interface ResolvedTraceConfig {
   flushInterval: number;
   maxConcurrentRequests: number;
   enableAutoError: boolean;
-  enableAutoPerformance: boolean;
   enableDebug: boolean;
+  includeUrlQuery: boolean;
+  includeUrlHash: boolean;
   hooks: TraceLifecycleHooks;
 }
 
@@ -46,13 +50,15 @@ export interface EnvInfo {
 }
 
 export interface TrackEventData {
+  eventType: EventType;
   eventName: string;
+  appId: string;
+  userId?: string;
+  sessionId?: string;
+  properties: TrackEventParams;
   timestamp: number;
-  projectId: string;
-  priority: EventPriority;
-  customParams: TrackEventParams;
-  commonParams: CommonParams;
-  envInfo: EnvInfo;
+  url: string;
+  referrer: string;
 }
 
 export interface TraceLifecycleHooks {
@@ -63,12 +69,14 @@ export interface TraceLifecycleHooks {
 }
 
 export interface TraceReporter {
-  report(event: TrackEventData): void | Promise<void>;
+  report(event: TrackEventData, priority: EventPriority): void | Promise<void>;
+  flush?(): void | Promise<void>;
+  destroy?(): void | Promise<void>;
 }
 
 export interface ITraceCore {
   register(config: TraceConfig): void;
-  trackEvent(eventName: string, params?: TrackEventParams, priority?: EventPriority): void;
+  trackEvent(eventName: string, params?: TrackEventParams, priority?: EventPriority, eventType?: EventType): void;
   addCommonParams(params: CommonParams): void;
   removeCommonParams(keys: string[]): void;
   getCommonParams(): CommonParams;
@@ -76,6 +84,7 @@ export interface ITraceCore {
   getEnvInfo(): EnvInfo | null;
   getConfig(): Readonly<ResolvedTraceConfig> | null;
   setReporter(reporter: TraceReporter | null): void;
+  destroy(): void;
 }
 
 export interface TracePlugin {

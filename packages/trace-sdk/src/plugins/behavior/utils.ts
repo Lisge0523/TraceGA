@@ -19,12 +19,10 @@ export interface MatchedElement {
 const MAX_SELECTORS = 20;
 const MAX_SELECTOR_LENGTH = 256;
 const MAX_ATTRIBUTE_LENGTH = 128;
+const MAX_URL_LENGTH = 2048;
 const IGNORE_SELECTOR = '[data-trace-ignore]';
 
-export function truncateString(
-  value: string | null | undefined,
-  maxLength = MAX_ATTRIBUTE_LENGTH,
-): string | undefined {
+export function truncateString(value: string | null | undefined, maxLength = MAX_ATTRIBUTE_LENGTH): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
   }
@@ -34,15 +32,10 @@ export function truncateString(
     return undefined;
   }
 
-  return normalized.length > maxLength
-    ? normalized.slice(0, maxLength)
-    : normalized;
+  return normalized.length > maxLength ? normalized.slice(0, maxLength) : normalized;
 }
 
-export function safeGetAttribute(
-  element: Element,
-  attributeName: string,
-): string | undefined {
+export function safeGetAttribute(element: Element, attributeName: string): string | undefined {
   try {
     return truncateString(element.getAttribute(attributeName));
   } catch {
@@ -50,21 +43,19 @@ export function safeGetAttribute(
   }
 }
 
-export function sanitizeUrl(
-  rawUrl: string | null | undefined,
-  options: UrlSanitizeOptions,
-): string {
+export function sanitizeUrl(rawUrl: string | null | undefined, options: UrlSanitizeOptions): string {
   if (!rawUrl) {
     return '';
   }
 
   try {
-    const baseUrl =
-      typeof window !== 'undefined' && window.location?.href
-        ? window.location.href
-        : 'http://tracega.local/';
+    const baseUrl = typeof window !== 'undefined' && window.location?.href ? window.location.href : 'http://tracega.local/';
 
     const parsedUrl = new URL(rawUrl, baseUrl);
+
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return '';
+    }
 
     // Credentials must never enter behavior events.
     parsedUrl.username = '';
@@ -78,15 +69,13 @@ export function sanitizeUrl(
       parsedUrl.hash = '';
     }
 
-    return parsedUrl.href;
+    return parsedUrl.href.slice(0, MAX_URL_LENGTH);
   } catch {
     return '';
   }
 }
 
-export function getCurrentPageUrl(
-  options: UrlSanitizeOptions,
-): string {
+export function getCurrentPageUrl(options: UrlSanitizeOptions): string {
   if (typeof window === 'undefined') {
     return '';
   }
@@ -94,17 +83,13 @@ export function getCurrentPageUrl(
   return sanitizeUrl(window.location?.href, options);
 }
 
-export function validateSelectors(
-  selectors: readonly string[],
-): readonly string[] {
+export function validateSelectors(selectors: readonly string[]): readonly string[] {
   if (!Array.isArray(selectors) || selectors.length === 0) {
     throw new TypeError('selectors must contain at least one CSS selector');
   }
 
   if (selectors.length > MAX_SELECTORS) {
-    throw new RangeError(
-      `selectors cannot contain more than ${MAX_SELECTORS} entries`,
-    );
+    throw new RangeError(`selectors cannot contain more than ${MAX_SELECTORS} entries`);
   }
 
   const normalizedSelectors = Array.from(
@@ -121,9 +106,7 @@ export function validateSelectors(
         }
 
         if (normalized.length > MAX_SELECTOR_LENGTH) {
-          throw new RangeError(
-            `selector cannot exceed ${MAX_SELECTOR_LENGTH} characters`,
-          );
+          throw new RangeError(`selector cannot exceed ${MAX_SELECTOR_LENGTH} characters`);
         }
 
         return normalized;
@@ -145,37 +128,49 @@ export function validateSelector(selector: string): string {
   return validateSelectors([selector])[0];
 }
 
+export function getSelectorAttributeFilter(selector: string): string[] {
+  const attributes = new Set<string>(['data-trace-ignore']);
+  const attributePattern = /\[\s*([a-zA-Z_][\w:.-]*)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = attributePattern.exec(selector))) {
+    attributes.add(match[1]);
+  }
+
+  if (selector.includes('.')) {
+    attributes.add('class');
+  }
+  if (selector.includes('#')) {
+    attributes.add('id');
+  }
+
+  const stateAttributes = ['checked', 'disabled', 'hidden', 'open', 'required', 'selected'];
+  stateAttributes.forEach(attribute => {
+    if (selector.includes(`:${attribute}`)) {
+      attributes.add(attribute);
+    }
+  });
+
+  return Array.from(attributes);
+}
+
 export function getEventElements(event: Event): Element[] {
   if (typeof Element === 'undefined') {
     return [];
   }
 
   try {
-    const eventPath =
-      typeof event.composedPath === 'function'
-        ? event.composedPath()
-        : [];
+    const eventPath = typeof event.composedPath === 'function' ? event.composedPath() : [];
 
-    const candidates =
-      eventPath.length > 0
-        ? eventPath
-        : [event.target];
+    const candidates = eventPath.length > 0 ? eventPath : [event.target];
 
-    return candidates.filter(
-      (candidate): candidate is Element =>
-        candidate instanceof Element,
-    );
+    return candidates.filter((candidate): candidate is Element => candidate instanceof Element);
   } catch {
-    return event.target instanceof Element
-      ? [event.target]
-      : [];
+    return event.target instanceof Element ? [event.target] : [];
   }
 }
 
-function safeMatches(
-  element: Element,
-  selector: string,
-): boolean {
+function safeMatches(element: Element, selector: string): boolean {
   try {
     return element.matches(selector);
   } catch {
@@ -183,19 +178,12 @@ function safeMatches(
   }
 }
 
-export function findMatchedElement(
-  event: Event,
-  selectors: readonly string[],
-): MatchedElement | null {
+export function findMatchedElement(event: Event, selectors: readonly string[]): MatchedElement | null {
   const elements = getEventElements(event);
 
   // Checking the complete composed path also handles ignore markers
   // outside a Shadow DOM click target.
-  if (
-    elements.some(element =>
-      safeMatches(element, IGNORE_SELECTOR),
-    )
-  ) {
+  if (elements.some(element => isIgnoredElement(element))) {
     return null;
   }
 
@@ -218,15 +206,11 @@ export function isIgnoredElement(element: Element): boolean {
   }
 }
 
-export function getElementMetadata(
-  element: Element,
-): ElementMetadata {
+export function getElementMetadata(element: Element): ElementMetadata {
   let tagName = 'unknown';
 
   try {
-    tagName =
-      truncateString(element.tagName.toLowerCase()) ??
-      'unknown';
+    tagName = truncateString(element.tagName.toLowerCase()) ?? 'unknown';
   } catch {
     // Keep the safe fallback.
   }
@@ -240,9 +224,7 @@ export function getElementMetadata(
   };
 }
 
-export function normalizeIntersectionRatio(
-  ratio: number,
-): number {
+export function normalizeIntersectionRatio(ratio: number): number {
   if (!Number.isFinite(ratio)) {
     return 0;
   }

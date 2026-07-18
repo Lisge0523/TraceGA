@@ -1,25 +1,13 @@
 import type { ITraceCore } from '../../../types';
-import {
-  BehaviorEventName,
-  type BehaviorErrorHandler,
-  type ExposureBehaviorPayload,
-  type ResolvedExposureTrackingOptions,
-} from '../types';
-import {
-  getCurrentPageUrl,
-  getElementMetadata,
-  isIgnoredElement,
-  normalizeIntersectionRatio,
-  validateSelector,
-} from '../utils';
+import { BehaviorEventName, type BehaviorErrorHandler, type ExposureBehaviorPayload, type ResolvedExposureTrackingOptions } from '../types';
+import { getCurrentPageUrl, getElementMetadata, getSelectorAttributeFilter, isIgnoredElement, normalizeIntersectionRatio, validateSelector } from '../utils';
 
 export class ExposureTracker {
   private core: ITraceCore | null = null;
   private installed = false;
   private selector = '';
 
-  private intersectionObserver: IntersectionObserver | null =
-    null;
+  private intersectionObserver: IntersectionObserver | null = null;
 
   private mutationObserver: MutationObserver | null = null;
 
@@ -29,7 +17,7 @@ export class ExposureTracker {
   private pendingAddedNodes = new Set<Node>();
   private pendingRemovedNodes = new Set<Node>();
   private pendingAttributeElements = new Set<Element>();
-  private scanScheduled = false;
+  private cancelScheduledScan: (() => void) | null = null;
 
   constructor(
     private readonly options: ResolvedExposureTrackingOptions,
@@ -51,14 +39,10 @@ export class ExposureTracker {
     }
 
     try {
-      this.intersectionObserver =
-        new IntersectionObserver(
-          this.handleIntersections,
-          {
-            threshold: this.options.threshold,
-            rootMargin: this.options.rootMargin,
-          },
-        );
+      this.intersectionObserver = new IntersectionObserver(this.handleIntersections, {
+        threshold: this.options.threshold,
+        rootMargin: this.options.rootMargin,
+      });
 
       this.observeInitialElements();
       this.installMutationObserver();
@@ -88,7 +72,8 @@ export class ExposureTracker {
       this.pendingAddedNodes.clear();
       this.pendingRemovedNodes.clear();
       this.pendingAttributeElements.clear();
-      this.scanScheduled = false;
+      this.cancelScheduledScan?.();
+      this.cancelScheduledScan = null;
       this.selector = '';
       this.core = null;
       this.installed = false;
@@ -98,76 +83,49 @@ export class ExposureTracker {
   private validateOptions(): void {
     const { threshold, rootMargin } = this.options;
 
-    if (
-      !Number.isFinite(threshold) ||
-      threshold < 0 ||
-      threshold > 1
-    ) {
-      throw new RangeError(
-        'exposure threshold must be between 0 and 1',
-      );
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+      throw new RangeError('exposure threshold must be between 0 and 1');
     }
 
-    if (
-      typeof rootMargin !== 'string' ||
-      rootMargin.length > 128
-    ) {
-      throw new TypeError(
-        'exposure rootMargin must be a valid string',
-      );
+    if (typeof rootMargin !== 'string' || rootMargin.length > 128) {
+      throw new TypeError('exposure rootMargin must be a valid string');
     }
   }
 
   private observeInitialElements(): void {
-    document
-      .querySelectorAll(this.selector)
-      .forEach(element => this.observeElement(element));
+    document.querySelectorAll(this.selector).forEach(element => this.observeElement(element));
   }
 
   private installMutationObserver(): void {
-    if (
-      typeof MutationObserver === 'undefined' ||
-      !document.documentElement
-    ) {
+    if (typeof MutationObserver === 'undefined' || !document.documentElement) {
       return;
     }
 
-    this.mutationObserver = new MutationObserver(
-      this.handleMutations,
-    );
+    this.mutationObserver = new MutationObserver(this.handleMutations);
 
     this.mutationObserver.observe(document.documentElement, {
+      attributeFilter: getSelectorAttributeFilter(this.selector),
       attributes: true,
       childList: true,
       subtree: true,
     });
   }
 
-  private readonly handleIntersections = (
-    entries: IntersectionObserverEntry[],
-  ): void => {
+  private readonly handleIntersections = (entries: IntersectionObserverEntry[]): void => {
     entries.forEach(entry => {
       try {
-        if (
-          !this.core ||
-          !(entry.target instanceof Element) ||
-          !entry.isIntersecting ||
-          entry.intersectionRatio < this.options.threshold
-        ) {
+        if (!this.core || !(entry.target instanceof Element) || !entry.isIntersecting || entry.intersectionRatio < this.options.threshold) {
           return;
         }
 
         const element = entry.target;
 
-        if (isIgnoredElement(element)) {
+        if (!element.isConnected || isIgnoredElement(element)) {
           this.unobserveElement(element);
           return;
         }
 
-        if (
-          this.options.once &&
-          this.exposedElements.has(element)
-        ) {
+        if (this.options.once && this.exposedElements.has(element)) {
           return;
         }
 
@@ -177,40 +135,26 @@ export class ExposureTracker {
           type: 'exposure',
           ...metadata,
           matchedSelector: this.selector,
-          intersectionRatio: normalizeIntersectionRatio(
-            entry.intersectionRatio,
-          ),
+          intersectionRatio: normalizeIntersectionRatio(entry.intersectionRatio),
           pageUrl: getCurrentPageUrl(this.options),
         };
 
-        this.core.trackEvent(
-          BehaviorEventName.EXPOSURE,
-          payload,
-          'high',
-        );
+        this.core.trackEvent(BehaviorEventName.EXPOSURE, payload, 'high', 'exposure');
 
         if (this.options.once) {
           this.exposedElements.add(element);
           this.unobserveElement(element);
         }
       } catch (error) {
-        this.reportError(
-          error,
-          'behavior.exposure.intersection',
-        );
+        this.reportError(error, 'behavior.exposure.intersection');
       }
     });
   };
 
-  private readonly handleMutations = (
-    records: MutationRecord[],
-  ): void => {
+  private readonly handleMutations = (records: MutationRecord[]): void => {
     try {
       records.forEach(record => {
-        if (
-          record.type === 'attributes' &&
-          record.target instanceof Element
-        ) {
+        if (record.type === 'attributes' && record.target instanceof Element) {
           this.pendingAttributeElements.add(record.target);
         }
 
@@ -225,22 +169,17 @@ export class ExposureTracker {
 
       this.scheduleMutationScan();
     } catch (error) {
-      this.reportError(
-        error,
-        'behavior.exposure.mutation',
-      );
+      this.reportError(error, 'behavior.exposure.mutation');
     }
   };
 
   private scheduleMutationScan(): void {
-    if (this.scanScheduled) {
+    if (this.cancelScheduledScan) {
       return;
     }
 
-    this.scanScheduled = true;
-
-    void Promise.resolve().then(() => {
-      this.scanScheduled = false;
+    const runScan = (): void => {
+      this.cancelScheduledScan = null;
 
       if (!this.installed) {
         this.pendingAddedNodes.clear();
@@ -258,20 +197,32 @@ export class ExposureTracker {
           this.observeNodeTree(node);
         });
 
-        this.pendingAttributeElements.forEach(element => {
+        this.getMinimalAttributeRoots().forEach(element => {
           this.refreshNodeTree(element);
         });
       } catch (error) {
-        this.reportError(
-          error,
-          'behavior.exposure.scan',
-        );
+        this.reportError(error, 'behavior.exposure.scan');
       } finally {
         this.pendingAddedNodes.clear();
         this.pendingRemovedNodes.clear();
         this.pendingAttributeElements.clear();
       }
-    });
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+      const frameId = requestAnimationFrame(runScan);
+      this.cancelScheduledScan = () => cancelAnimationFrame(frameId);
+      return;
+    }
+
+    const timeoutId = setTimeout(runScan, 0);
+    this.cancelScheduledScan = () => clearTimeout(timeoutId);
+  }
+
+  private getMinimalAttributeRoots(): Element[] {
+    const roots = Array.from(this.pendingAttributeElements).filter(element => element.isConnected);
+
+    return roots.filter(element => !roots.some(other => other !== element && other.contains(element)));
   }
 
   private observeNodeTree(node: Node): void {
@@ -283,9 +234,7 @@ export class ExposureTracker {
       this.observeElement(node);
     }
 
-    node
-      .querySelectorAll(this.selector)
-      .forEach(element => this.observeElement(element));
+    node.querySelectorAll(this.selector).forEach(element => this.observeElement(element));
   }
 
   private unobserveNodeTree(node: Node): void {
@@ -293,23 +242,16 @@ export class ExposureTracker {
       return;
     }
 
-    if (this.safeMatches(node)) {
-      this.unobserveElement(node);
-    }
-
-    node
-      .querySelectorAll(this.selector)
-      .forEach(element => this.unobserveElement(element));
+    Array.from(this.observedElements).forEach(element => {
+      if (element === node || node.contains(element)) {
+        this.unobserveElement(element);
+      }
+    });
   }
 
   private refreshNodeTree(root: Element): void {
     Array.from(this.observedElements).forEach(element => {
-      if (
-        (element === root || root.contains(element)) &&
-        (!element.isConnected ||
-          !this.safeMatches(element) ||
-          isIgnoredElement(element))
-      ) {
+      if ((element === root || root.contains(element)) && (!element.isConnected || !this.safeMatches(element) || isIgnoredElement(element))) {
         this.unobserveElement(element);
       }
     });
@@ -322,13 +264,7 @@ export class ExposureTracker {
   }
 
   private observeElement(element: Element): void {
-    if (
-      !this.intersectionObserver ||
-      this.observedElements.has(element) ||
-      isIgnoredElement(element) ||
-      (this.options.once &&
-        this.exposedElements.has(element))
-    ) {
+    if (!this.intersectionObserver || this.observedElements.has(element) || isIgnoredElement(element) || (this.options.once && this.exposedElements.has(element))) {
       return;
     }
 

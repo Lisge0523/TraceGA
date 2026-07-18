@@ -1,8 +1,4 @@
-export type RouteNavigationType =
-  | 'pushState'
-  | 'replaceState'
-  | 'popstate'
-  | 'hashchange';
+export type RouteNavigationType = 'pushState' | 'replaceState' | 'popstate' | 'hashchange';
 
 export interface RouteChange {
   navigationType: RouteNavigationType;
@@ -10,9 +6,7 @@ export interface RouteChange {
   pageUrl: string;
 }
 
-export type RouteChangeListener = (
-  change: RouteChange,
-) => void;
+export type RouteChangeListener = (change: RouteChange) => void;
 
 const listeners = new Set<RouteChangeListener>();
 
@@ -30,10 +24,7 @@ function readCurrentUrl(): string {
   }
 }
 
-function notifyRouteChange(
-  navigationType: RouteNavigationType,
-  previousUrl = lastKnownUrl,
-): void {
+function notifyRouteChange(navigationType: RouteNavigationType, previousUrl = lastKnownUrl): void {
   const pageUrl = readCurrentUrl();
 
   if (!pageUrl || pageUrl === previousUrl) {
@@ -62,20 +53,12 @@ const handlePopState = (): void => {
   notifyRouteChange('popstate');
 };
 
-const handleHashChange = (
-  event: HashChangeEvent,
-): void => {
-  notifyRouteChange(
-    'hashchange',
-    event.oldURL || lastKnownUrl,
-  );
+const handleHashChange = (event: HashChangeEvent): void => {
+  notifyRouteChange('hashchange', event.oldURL || lastKnownUrl);
 };
 
 function installRouteObserver(): void {
-  if (
-    typeof window === 'undefined' ||
-    typeof history === 'undefined'
-  ) {
+  if (typeof window === 'undefined' || typeof history === 'undefined') {
     return;
   }
 
@@ -87,24 +70,14 @@ function installRouteObserver(): void {
   originalPushState = capturedPushState;
   originalReplaceState = capturedReplaceState;
 
-  wrappedPushState = function patchedPushState(
-    this: History,
-    data: unknown,
-    unused: string,
-    url?: string | URL | null,
-  ): void {
+  wrappedPushState = function patchedPushState(this: History, data: unknown, unused: string, url?: string | URL | null): void {
     const previousUrl = readCurrentUrl();
 
     capturedPushState.call(this, data, unused, url);
     notifyRouteChange('pushState', previousUrl);
   };
 
-  wrappedReplaceState = function patchedReplaceState(
-    this: History,
-    data: unknown,
-    unused: string,
-    url?: string | URL | null,
-  ): void {
+  wrappedReplaceState = function patchedReplaceState(this: History, data: unknown, unused: string, url?: string | URL | null): void {
     const previousUrl = readCurrentUrl();
 
     capturedReplaceState.call(this, data, unused, url);
@@ -116,22 +89,13 @@ function installRouteObserver(): void {
     history.replaceState = wrappedReplaceState;
 
     window.addEventListener('popstate', handlePopState);
-    window.addEventListener(
-      'hashchange',
-      handleHashChange,
-    );
+    window.addEventListener('hashchange', handleHashChange);
   } catch (error) {
-    if (
-      wrappedPushState &&
-      history.pushState === wrappedPushState
-    ) {
+    if (wrappedPushState && history.pushState === wrappedPushState) {
       history.pushState = capturedPushState;
     }
 
-    if (
-      wrappedReplaceState &&
-      history.replaceState === wrappedReplaceState
-    ) {
+    if (wrappedReplaceState && history.replaceState === wrappedReplaceState) {
       history.replaceState = capturedReplaceState;
     }
 
@@ -146,33 +110,19 @@ function installRouteObserver(): void {
 }
 
 function uninstallRouteObserver(): void {
-  if (
-    typeof window === 'undefined' ||
-    typeof history === 'undefined'
-  ) {
+  if (typeof window === 'undefined' || typeof history === 'undefined') {
     return;
   }
 
   window.removeEventListener('popstate', handlePopState);
-  window.removeEventListener(
-    'hashchange',
-    handleHashChange,
-  );
+  window.removeEventListener('hashchange', handleHashChange);
 
   // Restore only when no third-party library has replaced our wrapper.
-  if (
-    originalPushState &&
-    wrappedPushState &&
-    history.pushState === wrappedPushState
-  ) {
+  if (originalPushState && wrappedPushState && history.pushState === wrappedPushState) {
     history.pushState = originalPushState;
   }
 
-  if (
-    originalReplaceState &&
-    wrappedReplaceState &&
-    history.replaceState === wrappedReplaceState
-  ) {
+  if (originalReplaceState && wrappedReplaceState && history.replaceState === wrappedReplaceState) {
     history.replaceState = originalReplaceState;
   }
 
@@ -183,17 +133,12 @@ function uninstallRouteObserver(): void {
   lastKnownUrl = '';
 }
 
-export function subscribeRouteChanges(
-  listener: RouteChangeListener,
-): () => void {
+export function subscribeRouteChanges(listener: RouteChangeListener): () => void {
   if (typeof listener !== 'function') {
     throw new TypeError('route listener must be a function');
   }
 
-  if (
-    typeof window === 'undefined' ||
-    typeof history === 'undefined'
-  ) {
+  if (typeof window === 'undefined' || typeof history === 'undefined') {
     return () => undefined;
   }
 

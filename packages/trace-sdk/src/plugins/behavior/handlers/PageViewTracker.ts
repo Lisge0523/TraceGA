@@ -1,19 +1,7 @@
 import type { ITraceCore } from '../../../types';
-import {
-  BehaviorEventName,
-  type BehaviorErrorHandler,
-  type PageViewBehaviorPayload,
-  type ResolvedPageViewTrackingOptions,
-} from '../types';
-import {
-  subscribeRouteChanges,
-  type RouteChange,
-  type RouteNavigationType,
-} from '../routeObserver';
-import {
-  getCurrentPageUrl,
-  sanitizeUrl,
-} from '../utils';
+import { BehaviorEventName, type BehaviorErrorHandler, type PageViewBehaviorPayload, type ResolvedPageViewTrackingOptions } from '../types';
+import { subscribeRouteChanges, type RouteChange, type RouteNavigationType } from '../routeObserver';
+import { getCurrentPageUrl, sanitizeUrl } from '../utils';
 
 export class PageViewTracker {
   private core: ITraceCore | null = null;
@@ -33,22 +21,13 @@ export class PageViewTracker {
 
     this.core = core;
     this.currentPageUrl = getCurrentPageUrl(this.options);
-    this.unsubscribeRoute = subscribeRouteChanges(
-      this.handleRouteChange,
-    );
+    this.unsubscribeRoute = subscribeRouteChanges(this.handleRouteChange);
     this.installed = true;
 
     if (this.options.trackInitial) {
-      const previousUrl =
-        typeof document !== 'undefined'
-          ? sanitizeUrl(document.referrer, this.options)
-          : '';
+      const previousUrl = typeof document !== 'undefined' ? sanitizeUrl(document.referrer, this.options) : '';
 
-      this.trackPageView(
-        'initial',
-        this.currentPageUrl,
-        previousUrl || undefined,
-      );
+      this.trackPageView('initial', this.currentPageUrl, previousUrl || undefined);
     }
   }
 
@@ -67,40 +46,25 @@ export class PageViewTracker {
     }
   }
 
-  private readonly handleRouteChange = (
-    change: RouteChange,
-  ): void => {
+  private readonly handleRouteChange = (change: RouteChange): void => {
     try {
-      const pageUrl = sanitizeUrl(
-        change.pageUrl,
-        this.options,
-      );
+      const pageUrl = sanitizeUrl(change.pageUrl, this.options);
 
       if (!pageUrl || pageUrl === this.currentPageUrl) {
         return;
       }
 
-      const previousUrl =
-        this.currentPageUrl ||
-        sanitizeUrl(change.previousUrl, this.options);
+      const previousUrl = this.currentPageUrl || sanitizeUrl(change.previousUrl, this.options);
 
       this.currentPageUrl = pageUrl;
 
-      this.trackPageView(
-        change.navigationType,
-        pageUrl,
-        previousUrl || undefined,
-      );
+      this.trackPageView(change.navigationType, pageUrl, previousUrl || undefined);
     } catch (error) {
       this.reportError(error, 'behavior.pageView.route');
     }
   };
 
-  private trackPageView(
-    navigationType: RouteNavigationType | 'initial',
-    pageUrl: string,
-    previousUrl?: string,
-  ): void {
+  private trackPageView(navigationType: RouteNavigationType | 'initial', pageUrl: string, previousUrl?: string): void {
     try {
       if (!this.core || !pageUrl) {
         return;
@@ -113,11 +77,7 @@ export class PageViewTracker {
         navigationType,
       };
 
-      this.core.trackEvent(
-        BehaviorEventName.PAGE_VIEW,
-        payload,
-        'high',
-      );
+      this.core.trackEvent(BehaviorEventName.PAGE_VIEW, payload, 'high', 'page_view');
     } catch (error) {
       this.reportError(error, 'behavior.pageView.track');
     }

@@ -1,13 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  debounce,
-  deepClone,
-  generateUUID,
-  isPlainObject,
-  parseUserAgent,
-  safeJsonStringify,
-  throttle,
-} from '../src';
+import { debounce, deepClone, generateUUID, isPlainObject, parseUserAgent, safeJsonStringify, throttle } from '../src';
 
 describe('SDK utilities', () => {
   it('deep clones nested data and circular references', () => {
@@ -30,17 +22,13 @@ describe('SDK utilities', () => {
   });
 
   it('generates a UUID and detects plain objects', () => {
-    expect(generateUUID()).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
+    expect(generateUUID()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(isPlainObject({ value: 1 })).toBe(true);
     expect(isPlainObject([])).toBe(false);
   });
 
   it('parses common browser user agents', () => {
-    const result = parseUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
-    );
+    const result = parseUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36');
     expect(result).toEqual({
       browser: 'Chrome',
       browserVersion: '124.0.0.0',

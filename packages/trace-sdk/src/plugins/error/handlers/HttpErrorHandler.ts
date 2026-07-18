@@ -1,6 +1,6 @@
 import type { ITraceCore } from '../../../types';
 import type { ErrorHandler, ErrorPayloadBase } from '../types';
-import { getBrowserContext } from '../types';
+import { getBrowserContext, sanitizeErrorUrl } from '../types';
 
 type XhrMeta = {
   method: string;
@@ -20,8 +20,11 @@ export interface HttpErrorPayload extends ErrorPayloadBase {
 export class HttpErrorHandler implements ErrorHandler {
   private core: ITraceCore | null = null;
   private originalFetch: typeof window.fetch | null = null;
+  private patchedFetch: typeof window.fetch | null = null;
   private originalXhrOpen: XMLHttpRequest['open'] | null = null;
   private originalXhrSend: XMLHttpRequest['send'] | null = null;
+  private patchedXhrOpen: XMLHttpRequest['open'] | null = null;
+  private patchedXhrSend: XMLHttpRequest['send'] | null = null;
   private readonly xhrMeta = new WeakMap<XMLHttpRequest, XhrMeta>();
 
   install(core: ITraceCore): void {
@@ -30,8 +33,14 @@ export class HttpErrorHandler implements ErrorHandler {
     }
 
     this.core = core;
-    this.patchFetch();
-    this.patchXhr();
+    try {
+      this.patchFetch();
+      this.patchXhr();
+    } catch (error) {
+      this.restorePatches();
+      this.core = null;
+      throw error;
+    }
   }
 
   uninstall(): void {
@@ -39,21 +48,7 @@ export class HttpErrorHandler implements ErrorHandler {
       return;
     }
 
-    if (this.originalFetch) {
-      window.fetch = this.originalFetch;
-      this.originalFetch = null;
-    }
-
-    if (this.originalXhrOpen) {
-      XMLHttpRequest.prototype.open = this.originalXhrOpen;
-      this.originalXhrOpen = null;
-    }
-
-    if (this.originalXhrSend) {
-      XMLHttpRequest.prototype.send = this.originalXhrSend;
-      this.originalXhrSend = null;
-    }
-
+    this.restorePatches();
     this.core = null;
   }
 
@@ -65,7 +60,7 @@ export class HttpErrorHandler implements ErrorHandler {
     this.originalFetch = window.fetch;
     const handler = this;
 
-    window.fetch = async function patchedFetch(input, init) {
+    const patchedFetch: typeof window.fetch = async function patchedFetch(this: Window, input, init) {
       const startedAt = Date.now();
       const method = handler.getFetchMethod(input, init);
       const requestUrl = handler.getFetchUrl(input);
@@ -103,6 +98,9 @@ export class HttpErrorHandler implements ErrorHandler {
         throw error;
       }
     };
+
+    this.patchedFetch = patchedFetch;
+    window.fetch = patchedFetch;
   }
 
   private patchXhr(): void {
@@ -114,7 +112,7 @@ export class HttpErrorHandler implements ErrorHandler {
     this.originalXhrSend = XMLHttpRequest.prototype.send;
     const handler = this;
 
-    XMLHttpRequest.prototype.open = function patchedOpen(method: string, url: string | URL) {
+    const patchedOpen = function patchedOpen(this: XMLHttpRequest, method: string, url: string | URL) {
       handler.xhrMeta.set(this, {
         method,
         url: String(url),
@@ -123,7 +121,7 @@ export class HttpErrorHandler implements ErrorHandler {
       return handler.originalXhrOpen!.apply(this, arguments as any);
     } as XMLHttpRequest['open'];
 
-    XMLHttpRequest.prototype.send = function patchedSend() {
+    const patchedSend = function patchedSend(this: XMLHttpRequest) {
       const xhr = this;
       const startedAt = Date.now();
 
@@ -168,10 +166,36 @@ export class HttpErrorHandler implements ErrorHandler {
 
       return handler.originalXhrSend!.apply(this, arguments as any);
     } as XMLHttpRequest['send'];
+
+    this.patchedXhrOpen = patchedOpen;
+    this.patchedXhrSend = patchedSend;
+    XMLHttpRequest.prototype.open = patchedOpen;
+    XMLHttpRequest.prototype.send = patchedSend;
+  }
+
+  private restorePatches(): void {
+    if (this.originalFetch && this.patchedFetch && window.fetch === this.patchedFetch) {
+      window.fetch = this.originalFetch;
+    }
+
+    if (typeof XMLHttpRequest !== 'undefined' && this.originalXhrOpen && this.patchedXhrOpen && XMLHttpRequest.prototype.open === this.patchedXhrOpen) {
+      XMLHttpRequest.prototype.open = this.originalXhrOpen;
+    }
+
+    if (typeof XMLHttpRequest !== 'undefined' && this.originalXhrSend && this.patchedXhrSend && XMLHttpRequest.prototype.send === this.patchedXhrSend) {
+      XMLHttpRequest.prototype.send = this.originalXhrSend;
+    }
+
+    this.originalFetch = null;
+    this.patchedFetch = null;
+    this.originalXhrOpen = null;
+    this.originalXhrSend = null;
+    this.patchedXhrOpen = null;
+    this.patchedXhrSend = null;
   }
 
   private reportHttpError(payload: HttpErrorPayload): void {
-    this.core?.trackEvent('http-error', payload);
+    this.core?.trackEvent('http-error', payload, 'urgent', 'error');
   }
 
   private getFetchMethod(input: RequestInfo | URL, init?: RequestInit): string | undefined {
@@ -188,15 +212,15 @@ export class HttpErrorHandler implements ErrorHandler {
 
   private getFetchUrl(input: RequestInfo | URL): string | undefined {
     if (typeof input === 'string') {
-      return input;
+      return sanitizeErrorUrl(input);
     }
 
     if (input instanceof URL) {
-      return input.href;
+      return sanitizeErrorUrl(input.href);
     }
 
     if (typeof Request !== 'undefined' && input instanceof Request) {
-      return input.url;
+      return sanitizeErrorUrl(input.url);
     }
 
     return undefined;

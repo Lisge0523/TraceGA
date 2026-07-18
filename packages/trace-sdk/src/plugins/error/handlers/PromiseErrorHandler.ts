@@ -16,7 +16,7 @@ export class PromiseErrorHandler implements ErrorHandler {
       return;
     }
 
-    this.core.trackEvent('promise-error', this.normalizeRejection(event.reason));
+    this.core.trackEvent('promise-error', this.normalizeRejection(event.reason), 'urgent', 'error');
   };
 
   install(core: ITraceCore): void {

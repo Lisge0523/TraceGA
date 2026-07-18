@@ -1,12 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  addCommonParams,
-  getCommonParams,
-  register,
-  removeCommonParams,
-  traceCore,
-  trackEvent,
-} from '../src';
+import { addCommonParams, getCommonParams, register, removeCommonParams, traceCore, trackEvent } from '../src';
 
 describe('public SDK API', () => {
   beforeEach(() => {
@@ -22,16 +15,18 @@ describe('public SDK API', () => {
     addCommonParams({ api_test: true });
     trackEvent('api_event', { source: 'public-api' }, 'high');
 
-    expect(getCommonParams()).toEqual(
-      expect.objectContaining({ api_test: true }),
-    );
+    expect(getCommonParams()).toEqual(expect.objectContaining({ api_test: true }));
     expect(reporter.report).toHaveBeenCalledWith(
       expect.objectContaining({
+        eventType: 'custom',
         eventName: 'api_event',
-        projectId: 'api',
-        priority: 'high',
-        customParams: { source: 'public-api' },
+        appId: 'api',
+        properties: expect.objectContaining({
+          api_test: true,
+          source: 'public-api',
+        }),
       }),
+      'high',
     );
   });
 });

@@ -1,27 +1,87 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ErrorPlugin, traceCore } from '../src';
+import { ErrorPlugin, TraceCore } from '../src';
 
-describe('TraceCore skeleton', () => {
-  it('should register without error', () => {
+describe('TraceCore', () => {
+  it('should register with default config', () => {
+    const core = new TraceCore();
+
     expect(() => {
-      traceCore.register({
+      core.register({
         projectId: 'test',
         reportUrl: 'http://localhost/api',
-        sampleRate: 0.5,
       });
     }).not.toThrow();
+
+    expect(core.getConfig()).toEqual(
+      expect.objectContaining({
+        projectId: 'test',
+        sampleRate: 1,
+        maxBufferSize: 20,
+        flushInterval: 3000,
+      }),
+    );
   });
 
-  it('should call trackEvent and log', () => {
-    const spy = vi.spyOn(console, 'log');
-    traceCore.trackEvent('test_event', { foo: 'bar' });
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+  it('should build and pass a stable event to the reporter', () => {
+    const core = new TraceCore();
+    const reporter = { report: vi.fn() };
+
+    core.setReporter(reporter);
+    core.register({
+      projectId: 'test',
+      reportUrl: 'http://localhost/api',
+    });
+    core.addCommonParams({ channel: 'web' });
+    core.trackEvent('test_event', { foo: 'bar' });
+
+    expect(reporter.report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'custom',
+        eventName: 'test_event',
+        appId: 'test',
+        properties: expect.objectContaining({
+          channel: 'web',
+          foo: 'bar',
+          uid: expect.any(String),
+        }),
+        timestamp: expect.any(Number),
+        url: expect.any(String),
+        referrer: expect.any(String),
+      }),
+      'normal',
+    );
   });
 });
 
 // Error插件测试
 describe('ErrorPlugin', () => {
+  it('contains handler installation failures and cleans up healthy handlers', () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'fetch');
+    const onError = vi.fn();
+    const plugin = new ErrorPlugin({ onError });
+    const core = { trackEvent: vi.fn() };
+
+    Object.defineProperty(window, 'fetch', {
+      configurable: true,
+      get: () => vi.fn(),
+      set: () => {
+        throw new Error('fetch is read-only');
+      },
+    });
+
+    try {
+      expect(() => plugin.install(core as any)).not.toThrow();
+      expect(onError).toHaveBeenCalledWith(expect.any(Error), 'error.install.handler');
+      expect(() => plugin.uninstall()).not.toThrow();
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(window, 'fetch', originalDescriptor);
+      } else {
+        delete (window as { fetch?: typeof fetch }).fetch;
+      }
+    }
+  });
+
   it('should track js-error events', () => {
     const plugin = new ErrorPlugin();
     const core = {
@@ -33,7 +93,7 @@ describe('ErrorPlugin', () => {
     window.dispatchEvent(
       new ErrorEvent('error', {
         message: error.message,
-        filename: 'app.js',
+        filename: 'app.js?token=secret#private',
         lineno: 10,
         colno: 20,
         error,
@@ -51,6 +111,8 @@ describe('ErrorPlugin', () => {
         errorName: 'Error',
         stack: error.stack,
       }),
+      'urgent',
+      'error',
     );
 
     plugin.uninstall();
@@ -96,6 +158,8 @@ describe('ErrorPlugin', () => {
         errorName: 'Error',
         stack: error.stack,
       }),
+      'urgent',
+      'error',
     );
 
     plugin.uninstall();
@@ -108,7 +172,7 @@ describe('ErrorPlugin', () => {
     };
     const image = document.createElement('img');
 
-    image.src = 'https://cdn.example.com/missing.png';
+    image.src = 'https://cdn.example.com/missing.png?token=secret#private';
     document.body.appendChild(image);
 
     plugin.install(core as any);
@@ -121,7 +185,10 @@ describe('ErrorPlugin', () => {
         tagName: 'img',
         resourceUrl: 'https://cdn.example.com/missing.png',
       }),
+      'urgent',
+      'error',
     );
+    expect(core.trackEvent.mock.calls[0]?.[1]).not.toHaveProperty('outerHTML');
 
     plugin.uninstall();
     image.remove();
@@ -140,7 +207,7 @@ describe('ErrorPlugin', () => {
     try {
       plugin.install(core as any);
 
-      await window.fetch('/api/fail', {
+      await window.fetch('/api/fail?token=secret#private', {
         method: 'POST',
       });
 
@@ -154,6 +221,8 @@ describe('ErrorPlugin', () => {
           status: 500,
           statusText: 'Server Error',
         }),
+        'urgent',
+        'error',
       );
     } finally {
       plugin.uninstall();

@@ -2,6 +2,7 @@ import type {
   CommonParams,
   EnvInfo,
   EventPriority,
+  EventType,
   ITraceCore,
   ResolvedTraceConfig,
   TraceConfig,
@@ -10,24 +11,32 @@ import type {
   TrackEventData,
   TrackEventParams,
 } from '../types';
+import { ErrorPlugin } from '../plugins/error/ErrorPlugin';
 import { deepClone, isPlainObject } from '../utils';
-import { collectEnvInfo } from './env';
+import { DefaultReporter } from './DefaultReporter';
+import { collectEnvInfo, refreshEnvInfo } from './env';
 
 const DEFAULT_CONFIG = {
   sampleRate: 1,
-  maxBufferSize: 50,
+  maxBufferSize: 20,
   flushInterval: 3000,
   maxConcurrentRequests: 3,
   enableAutoError: false,
-  enableAutoPerformance: false,
   enableDebug: false,
+  includeUrlQuery: false,
+  includeUrlHash: false,
 } as const;
+
+const MAX_BATCH_SIZE = 20;
 
 export class TraceCore implements ITraceCore {
   private config: ResolvedTraceConfig | null = null;
   private commonParams: CommonParams = Object.create(null) as CommonParams;
   private envInfo: EnvInfo | null = null;
   private reporter: TraceReporter | null = null;
+  private managedReporter: DefaultReporter | null = null;
+  private reporterOverridden = false;
+  private autoErrorPlugin: ErrorPlugin | null = null;
 
   register(config: TraceConfig): void {
     let hooks: TraceLifecycleHooks | undefined;
@@ -40,18 +49,21 @@ export class TraceCore implements ITraceCore {
         ...DEFAULT_CONFIG,
         projectId: config.projectId.trim(),
         reportUrl: config.reportUrl.trim(),
-        sampleRate: this.resolveNumber(config.sampleRate, DEFAULT_CONFIG.sampleRate),
-        maxBufferSize: this.resolvePositiveNumber(config.maxBufferSize, DEFAULT_CONFIG.maxBufferSize),
-        flushInterval: this.resolvePositiveNumber(config.flushInterval, DEFAULT_CONFIG.flushInterval),
-        maxConcurrentRequests: this.resolvePositiveNumber(config.maxConcurrentRequests, DEFAULT_CONFIG.maxConcurrentRequests),
-        enableAutoError: config.enableAutoError ?? DEFAULT_CONFIG.enableAutoError,
-        enableAutoPerformance: config.enableAutoPerformance ?? DEFAULT_CONFIG.enableAutoPerformance,
-        enableDebug: config.enableDebug ?? DEFAULT_CONFIG.enableDebug,
+        sampleRate: this.resolveSampleRate(config.sampleRate, DEFAULT_CONFIG.sampleRate),
+        maxBufferSize: this.resolveBufferSize(config.maxBufferSize, DEFAULT_CONFIG.maxBufferSize),
+        flushInterval: this.resolvePositiveInteger(config.flushInterval, DEFAULT_CONFIG.flushInterval, 'flushInterval'),
+        maxConcurrentRequests: this.resolvePositiveInteger(config.maxConcurrentRequests, DEFAULT_CONFIG.maxConcurrentRequests, 'maxConcurrentRequests'),
+        enableAutoError: this.resolveBoolean(config.enableAutoError, DEFAULT_CONFIG.enableAutoError, 'enableAutoError'),
+        enableDebug: this.resolveBoolean(config.enableDebug, DEFAULT_CONFIG.enableDebug, 'enableDebug'),
+        includeUrlQuery: this.resolveBoolean(config.includeUrlQuery, DEFAULT_CONFIG.includeUrlQuery, 'includeUrlQuery'),
+        includeUrlHash: this.resolveBoolean(config.includeUrlHash, DEFAULT_CONFIG.includeUrlHash, 'includeUrlHash'),
         hooks: Object.freeze(hooks),
       }) as ResolvedTraceConfig;
 
       this.config = resolvedConfig;
-      this.envInfo = collectEnvInfo();
+      this.envInfo = collectEnvInfo(this.getEnvCollectionOptions());
+      this.configureManagedReporter(resolvedConfig);
+      this.syncAutoErrorPlugin(resolvedConfig.enableAutoError);
       const configSnapshot = deepClone(resolvedConfig);
       this.runHook(() => resolvedConfig.hooks.onReady?.(configSnapshot), 'onReady');
     } catch (error) {
@@ -61,7 +73,7 @@ export class TraceCore implements ITraceCore {
     }
   }
 
-  trackEvent(eventName: string, params: TrackEventParams = {}, priority: EventPriority = 'normal'): void {
+  trackEvent(eventName: string, params: TrackEventParams = {}, priority: EventPriority = 'normal', eventType: EventType = 'custom'): void {
     try {
       if (!this.config || !this.envInfo) {
         return;
@@ -77,18 +89,25 @@ export class TraceCore implements ITraceCore {
       if (!['urgent', 'high', 'normal'].includes(priority)) {
         throw new TypeError('priority must be urgent, high, or normal');
       }
+      const normalizedEventType = this.resolveEventType(eventType);
       if (!this.shouldSample()) {
         return;
       }
 
+      const currentEnvInfo = refreshEnvInfo(this.envInfo, this.getEnvCollectionOptions());
+      this.envInfo = currentEnvInfo;
+      const commonParams = this.getCommonParams();
+      const properties = this.buildProperties(commonParams, params, currentEnvInfo);
       let event: TrackEventData = {
+        eventType: normalizedEventType,
         eventName: normalizedEventName,
+        appId: this.config.projectId,
+        userId: this.readIdentity(commonParams, ['userId', 'user_id']),
+        sessionId: this.readIdentity(commonParams, ['sessionId', 'session_id']),
+        properties,
         timestamp: Date.now(),
-        projectId: this.config.projectId,
-        priority,
-        customParams: deepClone(params),
-        commonParams: this.getCommonParams(),
-        envInfo: deepClone(this.envInfo),
+        url: this.readEventLocation(params, 'pageUrl') ?? currentEnvInfo.url,
+        referrer: this.readEventLocation(params, 'previousUrl') ?? currentEnvInfo.referrer,
       };
 
       const beforeTrackResult = this.config.hooks.onBeforeTrack?.(event);
@@ -99,7 +118,8 @@ export class TraceCore implements ITraceCore {
         event = beforeTrackResult;
       }
 
-      this.report(event);
+      event = this.normalizeEvent(event);
+      this.report(event, priority);
       this.runHook(() => this.config?.hooks.onTrack?.(event), 'onTrack');
     } catch (error) {
       this.handleError(error, 'trackEvent');
@@ -156,10 +176,11 @@ export class TraceCore implements ITraceCore {
 
   setUser(userId: string): void {
     try {
-      if (typeof userId !== 'string') {
-        throw new TypeError('userId must be a string');
+      if (typeof userId !== 'string' || !userId.trim()) {
+        throw new TypeError('userId must be a non-empty string');
       }
-      this.commonParams.user_id = userId;
+      this.commonParams.userId = userId.trim();
+      delete this.commonParams.user_id;
     } catch (error) {
       this.handleError(error, 'setUser');
     }
@@ -167,7 +188,11 @@ export class TraceCore implements ITraceCore {
 
   getEnvInfo(): EnvInfo | null {
     try {
-      return this.envInfo ? deepClone(this.envInfo) : null;
+      if (!this.envInfo || !this.config) {
+        return null;
+      }
+      this.envInfo = refreshEnvInfo(this.envInfo, this.getEnvCollectionOptions());
+      return deepClone(this.envInfo);
     } catch (error) {
       this.handleError(error, 'getEnvInfo');
       return null;
@@ -188,9 +213,30 @@ export class TraceCore implements ITraceCore {
       if (reporter !== null && typeof reporter.report !== 'function') {
         throw new TypeError('reporter must implement report(event)');
       }
+      this.disposeManagedReporter();
+      this.reporterOverridden = true;
       this.reporter = reporter;
     } catch (error) {
       this.handleError(error, 'setReporter');
+    }
+  }
+
+  destroy(): void {
+    try {
+      this.autoErrorPlugin?.uninstall();
+      this.autoErrorPlugin = null;
+
+      const reporter = this.reporter;
+      this.reporter = null;
+      this.managedReporter = null;
+      this.disposeReporter(reporter);
+
+      this.config = null;
+      this.envInfo = null;
+      this.commonParams = Object.create(null) as CommonParams;
+      this.reporterOverridden = false;
+    } catch (error) {
+      this.handleError(error, 'destroy');
     }
   }
 
@@ -205,9 +251,136 @@ export class TraceCore implements ITraceCore {
     return Math.random() < sampleRate;
   }
 
-  private report(event: TrackEventData): void {
+  private resolveEventType(eventType: EventType): EventType {
+    if (typeof eventType !== 'string' || !eventType.trim()) {
+      throw new TypeError('eventType must be a non-empty string');
+    }
+
+    return eventType.trim() as EventType;
+  }
+
+  private buildProperties(commonParams: CommonParams, customParams: TrackEventParams, envInfo: EnvInfo): TrackEventParams {
+    const properties = Object.create(null) as TrackEventParams;
+    const environmentProperties: TrackEventParams = {
+      uid: envInfo.uid,
+      userAgent: envInfo.userAgent,
+      browser: envInfo.browser,
+      browserVersion: envInfo.browserVersion,
+      os: envInfo.os,
+      osVersion: envInfo.osVersion,
+      screenWidth: envInfo.screenWidth,
+      screenHeight: envInfo.screenHeight,
+      viewportWidth: envInfo.viewportWidth,
+      viewportHeight: envInfo.viewportHeight,
+    };
+
+    this.copyProperties(properties, environmentProperties);
+    this.copyProperties(properties, commonParams, new Set(['userId', 'user_id', 'sessionId', 'session_id']));
+    this.copyProperties(properties, deepClone(customParams));
+    return properties;
+  }
+
+  private copyProperties(target: TrackEventParams, source: Record<string, unknown>, excludedKeys = new Set<string>()): void {
+    Object.keys(source).forEach(key => {
+      if (excludedKeys.has(key)) {
+        return;
+      }
+
+      const descriptor = Object.getOwnPropertyDescriptor(source, key);
+      if (!descriptor || !('value' in descriptor)) {
+        throw new TypeError('event properties cannot contain accessors');
+      }
+
+      Object.defineProperty(target, key, {
+        configurable: true,
+        enumerable: true,
+        value: descriptor.value,
+        writable: true,
+      });
+    });
+  }
+
+  private readIdentity(params: CommonParams, keys: readonly string[]): string | undefined {
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(params, key);
+      if (!descriptor || !('value' in descriptor)) {
+        continue;
+      }
+      if (typeof descriptor.value === 'string' && descriptor.value.trim()) {
+        return descriptor.value.trim();
+      }
+    }
+    return undefined;
+  }
+
+  private readEventLocation(params: TrackEventParams, key: 'pageUrl' | 'previousUrl'): string | undefined {
+    const descriptor = Object.getOwnPropertyDescriptor(params, key);
+    if (descriptor && 'value' in descriptor && typeof descriptor.value === 'string' && descriptor.value.trim()) {
+      return descriptor.value.trim();
+    }
+    return undefined;
+  }
+
+  private assertEvent(event: TrackEventData): void {
+    if (
+      !event ||
+      typeof event.eventType !== 'string' ||
+      !event.eventType.trim() ||
+      typeof event.eventName !== 'string' ||
+      !event.eventName.trim() ||
+      typeof event.appId !== 'string' ||
+      !event.appId.trim() ||
+      !isPlainObject(event.properties) ||
+      typeof event.timestamp !== 'number' ||
+      !Number.isFinite(event.timestamp) ||
+      typeof event.url !== 'string' ||
+      typeof event.referrer !== 'string'
+    ) {
+      throw new TypeError('track event does not match the backend schema');
+    }
+  }
+
+  private normalizeEvent(event: TrackEventData): TrackEventData {
+    this.assertEvent(event);
+
+    const properties = Object.create(null) as TrackEventParams;
+    this.copyProperties(properties, deepClone(event.properties));
+
+    const normalizedEvent: TrackEventData = {
+      eventType: event.eventType.trim() as EventType,
+      eventName: event.eventName.trim(),
+      appId: event.appId.trim(),
+      properties,
+      timestamp: event.timestamp,
+      url: event.url,
+      referrer: event.referrer,
+    };
+    const userId = this.normalizeOptionalIdentity(event.userId, 'userId');
+    const sessionId = this.normalizeOptionalIdentity(event.sessionId, 'sessionId');
+
+    if (userId) {
+      normalizedEvent.userId = userId;
+    }
+    if (sessionId) {
+      normalizedEvent.sessionId = sessionId;
+    }
+
+    return normalizedEvent;
+  }
+
+  private normalizeOptionalIdentity(value: string | undefined, fieldName: 'userId' | 'sessionId'): string | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new TypeError(`${fieldName} must be a non-empty string`);
+    }
+    return value.trim();
+  }
+
+  private report(event: TrackEventData, priority: EventPriority): void {
     try {
-      const reportResult = this.reporter?.report(event);
+      const reportResult = this.reporter?.report(event, priority);
       if (reportResult) {
         void Promise.resolve(reportResult).catch(error => {
           this.handleError(error, 'report');
@@ -257,12 +430,109 @@ export class TraceCore implements ITraceCore {
     return { onReady, onBeforeTrack, onTrack, onError };
   }
 
-  private resolveNumber(value: number | undefined, fallback: number): number {
-    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  private resolveSampleRate(value: number | undefined, fallback: number): number {
+    if (value === undefined) {
+      return fallback;
+    }
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+      throw new RangeError('sampleRate must be between 0 and 1');
+    }
+    return value;
   }
 
-  private resolvePositiveNumber(value: number | undefined, fallback: number): number {
-    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+  private resolveBufferSize(value: number | undefined, fallback: number): number {
+    const resolved = this.resolvePositiveInteger(value, fallback, 'maxBufferSize');
+    if (resolved > MAX_BATCH_SIZE) {
+      throw new RangeError(`maxBufferSize cannot exceed ${MAX_BATCH_SIZE}`);
+    }
+    return resolved;
+  }
+
+  private resolvePositiveInteger(value: number | undefined, fallback: number, fieldName: string): number {
+    if (value === undefined) {
+      return fallback;
+    }
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new RangeError(`${fieldName} must be a positive integer`);
+    }
+    return value;
+  }
+
+  private resolveBoolean(value: boolean | undefined, fallback: boolean, fieldName: string): boolean {
+    if (value === undefined) {
+      return fallback;
+    }
+    if (typeof value !== 'boolean') {
+      throw new TypeError(`${fieldName} must be a boolean`);
+    }
+    return value;
+  }
+
+  private getEnvCollectionOptions(): {
+    includeQuery: boolean;
+    includeHash: boolean;
+  } {
+    return {
+      includeQuery: this.config?.includeUrlQuery ?? false,
+      includeHash: this.config?.includeUrlHash ?? false,
+    };
+  }
+
+  private configureManagedReporter(config: Readonly<ResolvedTraceConfig>): void {
+    if (this.reporterOverridden || typeof window === 'undefined') {
+      return;
+    }
+
+    this.disposeManagedReporter();
+    const reporter = new DefaultReporter(config, (error, context) => {
+      this.handleError(error, context);
+    });
+    this.managedReporter = reporter;
+    this.reporter = reporter;
+  }
+
+  private disposeManagedReporter(): void {
+    if (!this.managedReporter) {
+      return;
+    }
+
+    const reporter = this.managedReporter;
+    this.managedReporter = null;
+    if (this.reporter === reporter) {
+      this.reporter = null;
+    }
+    this.disposeReporter(reporter);
+  }
+
+  private disposeReporter(reporter: TraceReporter | null): void {
+    try {
+      const result = reporter?.destroy?.();
+      if (result) {
+        void Promise.resolve(result).catch(error => {
+          this.handleError(error, 'reporter.destroy');
+        });
+      }
+    } catch (error) {
+      this.handleError(error, 'reporter.destroy');
+    }
+  }
+
+  private syncAutoErrorPlugin(enabled: boolean): void {
+    if (!enabled) {
+      this.autoErrorPlugin?.uninstall();
+      this.autoErrorPlugin = null;
+      return;
+    }
+
+    if (this.autoErrorPlugin) {
+      return;
+    }
+
+    const plugin = new ErrorPlugin({
+      onError: (error, context) => this.handleError(error, context),
+    });
+    plugin.install(this);
+    this.autoErrorPlugin = plugin;
   }
 
   private runHook(callback: () => void, context: string): void {

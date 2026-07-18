@@ -1,27 +1,10 @@
-import type {
-  ITraceCore,
-  TracePlugin,
-} from '../../types';
+import type { ITraceCore, TracePlugin } from '../../types';
 import { ClickTracker } from './handlers/ClickTracker';
 import { ExposureTracker } from './handlers/ExposureTracker';
 import { PageViewTracker } from './handlers/PageViewTracker';
-import type {
-  BehaviorErrorHandler,
-  BehaviorPluginOptions,
-  ResolvedClickTrackingOptions,
-  ResolvedExposureTrackingOptions,
-  ResolvedPageViewTrackingOptions,
-} from './types';
+import type { BehaviorErrorHandler, BehaviorPluginOptions, ResolvedClickTrackingOptions, ResolvedExposureTrackingOptions, ResolvedPageViewTrackingOptions } from './types';
 
-const DEFAULT_CLICK_SELECTORS = Object.freeze([
-  'button',
-  'a',
-  'input',
-  'select',
-  'textarea',
-  '[role="button"]',
-  '[data-trace-id]',
-]);
+const DEFAULT_CLICK_SELECTORS = Object.freeze(['button', 'a', 'input', 'select', 'textarea', '[role="button"]', '[data-trace-id]']);
 
 interface Tracker {
   install(core: ITraceCore): void;
@@ -51,21 +34,13 @@ export class BehaviorPlugin implements TracePlugin {
       return;
     }
 
-    if (
-      typeof window === 'undefined' ||
-      typeof document === 'undefined'
-    ) {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
       return;
     }
 
     try {
-      if (
-        !core ||
-        typeof core.trackEvent !== 'function'
-      ) {
-        throw new TypeError(
-          'BehaviorPlugin requires a valid TraceCore',
-        );
+      if (!core || typeof core.trackEvent !== 'function') {
+        throw new TypeError('BehaviorPlugin requires a valid TraceCore');
       }
     } catch (error) {
       this.reportError(error, 'behavior.install.core');
@@ -99,10 +74,7 @@ export class BehaviorPlugin implements TracePlugin {
       try {
         tracker.uninstall();
       } catch (error) {
-        this.reportError(
-          error,
-          'behavior.uninstall.tracker',
-        );
+        this.reportError(error, 'behavior.uninstall.tracker');
       }
     });
   }
@@ -111,97 +83,60 @@ export class BehaviorPlugin implements TracePlugin {
     const trackers: Tracker[] = [];
 
     if (this.options.click) {
-      trackers.push(
-        new ClickTracker(
-          this.options.click,
-          this.reportError,
-        ),
-      );
+      trackers.push(new ClickTracker(this.options.click, this.reportError));
     }
 
     if (this.options.pageView) {
-      trackers.push(
-        new PageViewTracker(
-          this.options.pageView,
-          this.reportError,
-        ),
-      );
+      trackers.push(new PageViewTracker(this.options.pageView, this.reportError));
     }
 
     if (this.options.exposure) {
-      trackers.push(
-        new ExposureTracker(
-          this.options.exposure,
-          this.reportError,
-        ),
-      );
+      trackers.push(new ExposureTracker(this.options.exposure, this.reportError));
     }
 
     return trackers;
   }
 
-  private resolveOptions(
-    options: BehaviorPluginOptions,
-  ): ResolvedBehaviorOptions {
+  private resolveOptions(options: BehaviorPluginOptions): ResolvedBehaviorOptions {
     const click =
       options.click === false
         ? false
         : Object.freeze({
-            selectors: Object.freeze([
-              ...(options.click?.selectors ??
-                DEFAULT_CLICK_SELECTORS),
-            ]),
-            includeQuery:
-              options.click?.includeQuery ?? false,
-            includeHash:
-              options.click?.includeHash ?? false,
+            selectors: Object.freeze([...(options.click?.selectors ?? DEFAULT_CLICK_SELECTORS)]),
+            includeQuery: options.click?.includeQuery ?? false,
+            includeHash: options.click?.includeHash ?? false,
           });
 
     const pageView =
       options.pageView === false
         ? false
         : Object.freeze({
-            trackInitial:
-              options.pageView?.trackInitial ?? true,
-            includeQuery:
-              options.pageView?.includeQuery ?? false,
-            includeHash:
-              options.pageView?.includeHash ?? false,
+            trackInitial: options.pageView?.trackInitial ?? true,
+            includeQuery: options.pageView?.includeQuery ?? false,
+            includeHash: options.pageView?.includeHash ?? false,
           });
 
     const exposure =
       options.exposure === false
         ? false
         : Object.freeze({
-            selector:
-              options.exposure?.selector ??
-              '[data-trace-exposure]',
-            threshold:
-              options.exposure?.threshold ?? 0.5,
-            rootMargin:
-              options.exposure?.rootMargin ?? '0px',
+            selector: options.exposure?.selector ?? '[data-trace-exposure]',
+            threshold: options.exposure?.threshold ?? 0.5,
+            rootMargin: options.exposure?.rootMargin ?? '0px',
             once: options.exposure?.once ?? true,
-            includeQuery:
-              options.exposure?.includeQuery ?? false,
-            includeHash:
-              options.exposure?.includeHash ?? false,
+            includeQuery: options.exposure?.includeQuery ?? false,
+            includeHash: options.exposure?.includeHash ?? false,
           });
 
     return Object.freeze({
       click,
       pageView,
       exposure,
-      onError:
-        typeof options.onError === 'function'
-          ? options.onError
-          : undefined,
+      onError: typeof options.onError === 'function' ? options.onError : undefined,
     });
   }
 
-  private readonly reportError: BehaviorErrorHandler = (
-    error,
-    context,
-  ): void => {
+  private readonly reportError: BehaviorErrorHandler = (error, context): void => {
     try {
       this.options.onError?.(error, context);
     } catch {
