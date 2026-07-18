@@ -57,5 +57,18 @@ export class TrackRepository {
 
   private toOccurredAt(timestamp?: number): Date {
     return timestamp ? new Date(timestamp) : new Date()
+      data: {
+        project_id: event.appId,
+        event_name: event.eventName,
+        event_type: event.eventType,
+        uid: event.userId || '',
+        session_id: event.sessionId || '',
+        page_url: event.url || '',
+        event_params: event.properties || {},
+        common_params: {},
+        user_agent: userAgent || '',
+        ip: ip || '',
+      },
+    })
   }
 }

@@ -13,6 +13,9 @@
     "rootDir": "./src",
     "ignoreDeprecations": "5.0",
     "incremental": false,
+    "typeRoots": ["./node_modules/@types", "../../node_modules/@types"],
+    "types": ["node", "express"],
+    "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": false,
     "noImplicitAny": false,
@@ -22,7 +25,8 @@
     "paths": {
       "@/*": [
         "src/*"
-      ]
+      ],
+      "@generated/prisma": ["./dist/generated/prisma"]
     }
   },
   "include": [

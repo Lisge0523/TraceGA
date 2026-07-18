@@ -1,5 +1,7 @@
 import { EventBuffer } from './EventBuffer';
 import type { TrackEventData } from '../types';
+import type { StoragePersister } from '../utils/StoragePersister';
+import type { ConcurrencyLimiter } from './ConcurrencyLimiter';
 
 export type Priority = 'urgent' | 'high' | 'normal';
 
@@ -14,6 +16,10 @@ export interface PrioritySchedulerConfig {
   onFlush: (events: TrackEventData[]) => Promise<void>;
   /** requestIdleCallback 降级超时（毫秒），默认 3000 */
   idleTimeoutFallback?: number;
+  /** 持久化工具，用于初始化时补发 localStorage 中残留的失败缓存 */
+  persister?: StoragePersister;
+  /** 并发限制器，用于控制同时进行的上报请求数 */
+  limiter?: ConcurrencyLimiter;
 }
 
 /**
@@ -42,6 +48,8 @@ export class PriorityScheduler {
   private timerId: ReturnType<typeof setTimeout> | null;
   private idleId: number | null;
   private flushing: boolean;
+  private persister: StoragePersister | undefined;
+  private limiter: ConcurrencyLimiter | undefined;
 
   constructor(config: PrioritySchedulerConfig) {
     this.maxBufferSize = config.maxBufferSize;
@@ -52,6 +60,8 @@ export class PriorityScheduler {
     this.timerId = null;
     this.idleId = null;
     this.flushing = false;
+    this.persister = config.persister;
+    this.limiter = config.limiter;
 
     this.urgentBuffer = new EventBuffer<TrackEventData>(this.urgentMaxSize);
     this.highBuffer = new EventBuffer<TrackEventData>(this.maxBufferSize);
@@ -59,6 +69,7 @@ export class PriorityScheduler {
 
     this.scheduleNext();
     this.scheduleIdle();
+    this.recoverFailedCache();
   }
 
   /**
@@ -85,6 +96,26 @@ export class PriorityScheduler {
   flush(): void {
     this.clearTimer();
     this.doFlushAndSchedule();
+  }
+
+  /**
+   * 暂停调度器定时器（不清空缓冲区），供页面隐藏时使用。
+   */
+  pause(): void {
+    this.clearTimer();
+  }
+
+  /**
+   * 取出所有队列中的全部数据（不触发上报），用于页面隐藏时通过 sendBeacon 发送。
+   *
+   * @returns 按 urgent → high → normal 顺序拼接的事件数组
+   */
+  takeAll(): TrackEventData[] {
+    return [
+      ...this.urgentBuffer.takeAll(),
+      ...this.highBuffer.takeAll(),
+      ...this.normalBuffer.takeAll(),
+    ];
   }
 
   /**
@@ -120,18 +151,54 @@ export class PriorityScheduler {
   }
 
   /**
+   * 初始化时检查 localStorage 残留缓存，若存在则立即以 urgent 优先级补发。
+   * 补发后清除缓存，防止重复上报。
+   */
+  private recoverFailedCache(): void {
+    if (!this.persister) return;
+
+    const cached = this.persister.load('trace_failed_cache');
+    if (!cached) return;
+
+    // 支持单个事件或事件数组
+    const events: TrackEventData[] = Array.isArray(cached) ? cached : [cached];
+    for (const event of events) {
+      this.urgentBuffer.push(event);
+    }
+
+    // 清除已读取的缓存
+    this.persister.clear('trace_failed_cache');
+
+    // 若有缓存数据，立即触发一次全量上报
+    if (this.urgentBuffer.size() > 0) {
+      this.clearTimer();
+      this.doFlushAndSchedule();
+    }
+  }
+
+  /**
    * 定时触发的全量上报，完成后安排下一次。
+   * 上报失败静默处理（已在 transporter 中完成重试/缓存）。
    */
   private async doScheduledFlush(): Promise<void> {
-    await this.doFlush();
+    try {
+      await this.doFlush();
+    } catch {
+      // 上报失败已在 transporter 中处理
+    }
     this.scheduleNext();
   }
 
   /**
    * 阈值/手动触发后的全量上报，完成后重新安排定时器。
+   * 上报失败静默处理（已在 transporter 中完成重试/缓存）。
    */
   private async doFlushAndSchedule(): Promise<void> {
-    await this.doFlush();
+    try {
+      await this.doFlush();
+    } catch {
+      // 上报失败已在 transporter 中处理
+    }
     this.scheduleNext();
   }
 
@@ -194,7 +261,12 @@ export class PriorityScheduler {
 
     this.flushing = true;
     try {
-      await this.onFlush(events);
+      await this.limiter?.acquire();
+      try {
+        await this.onFlush(events);
+      } finally {
+        this.limiter?.release();
+      }
     } finally {
       this.flushing = false;
     }
@@ -219,7 +291,12 @@ export class PriorityScheduler {
 
     this.flushing = true;
     try {
-      await this.onFlush(events);
+      await this.limiter?.acquire();
+      try {
+        await this.onFlush(events);
+      } finally {
+        this.limiter?.release();
+      }
     } finally {
       this.flushing = false;
     }
