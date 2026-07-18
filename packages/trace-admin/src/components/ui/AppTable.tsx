@@ -56,6 +56,8 @@ export interface AppTableProps<T extends Record<string, unknown>> {
   emptyAction?: React.ReactNode
   /** 搜索无结果提示 */
   searchEmptyDescription?: string
+  /** 是否显示「搜索无结果」空状态（而非「数据为空」） */
+  showSearchEmpty?: boolean
   /** 错误重试回调 */
   onRetry?: () => void
   /** 工具栏内容 */
@@ -100,12 +102,14 @@ function SkeletonRows({
   columnCount: number
   rowCount?: number
 }) {
+  // 确定性宽度模式 — 避免 Math.random() 导致 re-render 不一致
+  const widthPattern = ['85%', '70%', '90%', '60%', '75%']
   return (
     <>
       {Array.from({ length: rowCount }).map((_, i) => (
         <tr key={`skeleton-${i}`}>
           <td colSpan={columnCount} style={{ padding: '10px 16px' }}>
-            <Skeleton active paragraph={false} title={{ width: `${60 + Math.random() * 30}%` }} />
+            <Skeleton active paragraph={false} title={{ width: widthPattern[i] ?? '80%' }} />
           </td>
         </tr>
       ))}
@@ -214,6 +218,7 @@ export function AppTable<T extends Record<string, unknown>>({
   emptyDescription,
   emptyAction,
   searchEmptyDescription,
+  showSearchEmpty = false,
   onRetry,
   toolBar,
   rowSelection,
@@ -245,9 +250,6 @@ export function AppTable<T extends Record<string, unknown>>({
     field?: string
     order?: 'ascend' | 'descend'
   }>(defaultSort ? { field: defaultSort.field, order: defaultSort.order } : {})
-
-  // ── 搜索条件标记（用于区分「数据为空」vs「搜索无结果」） ──
-  const [hasSearchParams, setHasSearchParams] = useState(false)
 
   // ── 列可见性状态（B 端持久化） ─────────────────────────────
   const tableKey = useRef(
@@ -315,19 +317,6 @@ export function AppTable<T extends Record<string, unknown>>({
     fetchData()
   }, [fetchData, refreshKey])
 
-  // ── 标记搜索条件存在（给外部使用） ────────────────────────
-  const markHasSearch = useCallback((val: boolean) => {
-    setHasSearchParams(val)
-  }, [])
-
-  // 将 markHasSearch 暴露出去：当 request 中有额外搜索参数时由外部调用
-  useEffect(() => {
-    // 如果 error 状态后重试，保持之前的搜索标记
-  }, [])
-
-  // 忽略 markHasSearch 的 unused 警告 — 它是公开 API
-  void markHasSearch
-
   // ── 排序变化 ──────────────────────────────────────────────
   const handleTableChange = useCallback(
     (
@@ -392,7 +381,7 @@ export function AppTable<T extends Record<string, unknown>>({
     : loading
       ? null
       : data.length === 0
-        ? hasSearchParams
+        ? showSearchEmpty
           ? 'search-empty'
           : 'empty'
         : null
@@ -428,9 +417,11 @@ export function AppTable<T extends Record<string, unknown>>({
             {data.map((record, i) => (
               <div
                 key={String(
-                  typeof rowKey === 'function'
-                    ? rowKey(record)
-                    : (record as Record<string, unknown>)[rowKey as string] ?? i,
+                  (() => {
+                    if (typeof rowKey === 'function') return rowKey(record)
+                    const val = (record as Record<string, unknown>)[rowKey as string]
+                    return val != null ? val : i
+                  })(),
                 )}
                 className="tk-card"
                 style={{
