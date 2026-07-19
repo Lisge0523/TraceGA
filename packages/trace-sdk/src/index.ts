@@ -1,33 +1,13 @@
-import { traceCore, TraceCore } from './core';
-import type { CommonParams, EventPriority, EventType, TraceConfig, TrackEventParams } from './types';
+// 主类
+export { Reporter } from './reporter/index';
 
-export { traceCore, TraceCore };
+// 核心类型
+export type { TrackEventData, TraceConfig, EnvInfo, CommonParams, ITraceCore } from './types';
 
-export function register(config: TraceConfig): void {
-  traceCore.register(config);
-}
+// 优先级类型
+export type { Priority } from './core/PriorityScheduler';
 
-export function trackEvent(eventName: string, params?: TrackEventParams, priority?: EventPriority, eventType?: EventType): void {
-  traceCore.trackEvent(eventName, params, priority, eventType);
-}
-
-export function addCommonParams(params: CommonParams): void {
-  traceCore.addCommonParams(params);
-}
-
-export function removeCommonParams(keys: string[]): void {
-  traceCore.removeCommonParams(keys);
-}
-
-export function getCommonParams(): CommonParams {
-  return traceCore.getCommonParams();
-}
-
-export function destroy(): void {
-  traceCore.destroy();
-}
-
-export * from './core';
-export * from './plugins';
-export * from './types';
-export * from './utils';
+// 版本号
+export const reporterVersion = '0.0.1';
+export const pluginVersion = '0.0.1';
+export const utilsVersion = '0.0.1';

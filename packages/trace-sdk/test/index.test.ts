@@ -1,8 +1,26 @@
-import { describe, it, expect, vi } from 'vitest';
-import { ErrorPlugin, TraceCore } from '../src';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Reporter } from '../src/reporter/index';
 
-describe('TraceCore', () => {
-  it('should register with default config', () => {
+describe('Reporter exports', () => {
+  let reporter: Reporter;
+
+  beforeEach(() => {
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0',
+      sendBeacon: vi.fn().mockReturnValue(true),
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    ));
+    reporter = new Reporter();
+  });
+
+  afterEach(() => {
+    reporter.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it('should register without error', () => {
     const core = new TraceCore();
 
     expect(() => {
