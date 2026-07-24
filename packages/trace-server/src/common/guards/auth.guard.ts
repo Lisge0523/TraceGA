@@ -15,7 +15,8 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('未提供认证令牌')
     }
 
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader
+    const match = authHeader.match(/^[Bb]earer\s+(.+)$/)
+    const token = match ? match[1] : authHeader
 
     if (!token) {
       throw new UnauthorizedException('认证令牌无效')

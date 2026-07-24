@@ -1,4 +1,4 @@
-import { IsEmail, IsMobilePhone, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator'
+import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator'
 
 export class RegisterDto {
   @IsString()
@@ -23,6 +23,7 @@ export class RegisterDto {
 
   @IsOptional()
   @IsString()
+  @IsIn(['admin', 'viewer'], { message: '角色只能是 admin 或 viewer' })
   @MaxLength(32)
   role?: string
 }

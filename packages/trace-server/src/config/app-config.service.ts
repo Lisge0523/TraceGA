@@ -38,8 +38,8 @@ export class AppConfigService {
 
   get jwt() {
     return {
-      secret: this.configService.get<string>('JWT_SECRET', 'tracega_jwt_secret_key_2026'),
-      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN', '7d'),
+      secret: this.configService.get<string>('JWT_SECRET') ?? '',
+      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN') ?? '7d',
     }
   }
 }
